@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Dataset","Represents the HDF5 dataset object."]]});

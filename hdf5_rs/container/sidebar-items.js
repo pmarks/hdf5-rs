@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["Container","A trait for HDF5 objects that can contain other objects (file, group)."]]});

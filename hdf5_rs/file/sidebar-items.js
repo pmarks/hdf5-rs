@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["File","Represents the HDF5 file object."]]});

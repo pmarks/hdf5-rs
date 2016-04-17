@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Datatype","Represents the HDF5 datatype object."]],"trait":[["AnyDatatype","A trait for all HDF5 datatypes."],["AtomicDatatype","A trait for atomic scalar datatypes."],["ToDatatype","A trait for native types that are convertible to HDF5 datatypes."]]});

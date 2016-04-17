@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["Location","A trait for HDF5 objects that can have a named location (file, group, dataset)."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["Object","A trait for all HDF5 objects that can be referenced through an identifier."]]});

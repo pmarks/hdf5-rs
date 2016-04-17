@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Dataspace","Represents the HDF5 dataspace object."]],"trait":[["Dimension","A trait for the shape and index types."]],"type":[["Ix","A scalar integer type used by `Dimension` trait for indexing."]]});

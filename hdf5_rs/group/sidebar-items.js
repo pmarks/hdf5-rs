@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Group","Represents the HDF5 group object."]]});
