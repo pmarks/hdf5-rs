@@ -1,6 +1,5 @@
 use ffi::h5d::H5Dopen2;
 use ffi::h5g::{H5G_info_t, H5Gget_info, H5Gcreate2, H5Gopen2};
-use ffi::h5i::hid_t;
 use ffi::h5l::{H5Lmove, H5Lcreate_soft, H5Lcreate_hard, H5Ldelete, H5L_SAME_LOC};
 use ffi::h5p::{H5Pcreate, H5Pset_create_intermediate_group, H5P_DEFAULT};
 use globals::H5P_LINK_CREATE;
@@ -9,17 +8,12 @@ use dataset::{Dataset, DatasetBuilder};
 use datatype::ToDatatype;
 use error::Result;
 use group::Group;
-use handle::{ID, FromID};
-use location::Location;
+use location::LocationType;
+use object::{Object, ObjectID};
 use plist::PropertyList;
 use util::to_cstring;
 
 use std::default::Default;
-
-fn group_info(id: hid_t) -> Result<H5G_info_t> {
-    let info: *mut H5G_info_t = &mut H5G_info_t::default();
-    h5call!(H5Gget_info(id, info)).and(Ok(unsafe { *info }))
-}
 
 fn make_lcpl() -> Result<PropertyList> {
     h5lock!({
@@ -29,19 +23,26 @@ fn make_lcpl() -> Result<PropertyList> {
 }
 
 /// A trait for HDF5 objects that can contain other objects (file, group).
-pub trait Container: Location {
+pub trait ContainerType : LocationType {}
+
+impl<T: ContainerType> Object<T> {
+    fn group_info(&self) -> Result<H5G_info_t> {
+        let info: *mut H5G_info_t = &mut H5G_info_t::default();
+        h5call!(H5Gget_info(self.id(), info)).and(Ok(unsafe { *info }))
+    }
+
     /// Returns the number of objects in the container (or 0 if the container is invalid).
-    fn len(&self) -> u64 {
-        group_info(self.id()).map(|info| info.nlinks).unwrap_or(0)
+    pub fn len(&self) -> u64 {
+        self.group_info().map(|info| info.nlinks).unwrap_or(0)
     }
 
     /// Returns true if the container has no linked objects (or if the container is invalid).
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Create a new group in a file or group.
-    fn create_group(&self, name: &str) -> Result<Group> {
+    pub fn create_group(&self, name: &str) -> Result<Group> {
         h5lock!({
             let lcpl = make_lcpl()?;
             let name = to_cstring(name)?;
@@ -52,14 +53,14 @@ pub trait Container: Location {
     }
 
     /// Opens an existing group in a file or group.
-    fn group(&self, name: &str) -> Result<Group> {
+    pub fn group(&self, name: &str) -> Result<Group> {
         let name = to_cstring(name)?;
         Group::from_id(h5try!(H5Gopen2(
             self.id(), name.as_ptr(), H5P_DEFAULT)))
     }
 
     /// Creates a soft link. Note: `src` and `dst` are relative to the current object.
-    fn link_soft(&self, src: &str, dst: &str) -> Result<()> {
+    pub fn link_soft(&self, src: &str, dst: &str) -> Result<()> {
         h5lock!({
             let lcpl = make_lcpl()?;
             let src = to_cstring(src)?;
@@ -71,7 +72,7 @@ pub trait Container: Location {
     }
 
     /// Creates a hard link. Note: `src` and `dst` are relative to the current object.
-    fn link_hard(&self, src: &str, dst: &str) -> Result<()> {
+    pub fn link_hard(&self, src: &str, dst: &str) -> Result<()> {
         let src = to_cstring(src)?;
         let dst = to_cstring(dst)?;
         h5call!(H5Lcreate_hard(
@@ -80,7 +81,7 @@ pub trait Container: Location {
     }
 
     /// Relinks an object. Note: `name` and `path` are relative to the current object.
-    fn relink(&self, name: &str, path: &str) -> Result<()> {
+    pub fn relink(&self, name: &str, path: &str) -> Result<()> {
         let name = to_cstring(name)?;
         let path = to_cstring(path)?;
         h5call!(H5Lmove(
@@ -89,7 +90,7 @@ pub trait Container: Location {
     }
 
     /// Removes a link to an object from this file or group.
-    fn unlink(&self, name: &str) -> Result<()> {
+    pub fn unlink(&self, name: &str) -> Result<()> {
         let name = to_cstring(name)?;
         h5call!(H5Ldelete(
             self.id(), name.as_ptr(), H5P_DEFAULT
@@ -97,12 +98,12 @@ pub trait Container: Location {
     }
 
     /// Instantiates a new dataset builder.
-    fn new_dataset<T: ToDatatype>(&self) -> DatasetBuilder<T> {
-        DatasetBuilder::<T>::new::<Self>(self)
+    pub fn new_dataset<D: ToDatatype>(&self) -> DatasetBuilder<D> {
+        DatasetBuilder::<D>::new(&self)
     }
 
     /// Opens an existing dataset in the file or group.
-    fn dataset(&self, name: &str) -> Result<Dataset> {
+    pub fn dataset(&self, name: &str) -> Result<Dataset> {
         let name = to_cstring(name)?;
         Dataset::from_id(h5try!(H5Dopen2(
             self.id(), name.as_ptr(), H5P_DEFAULT)))
@@ -112,10 +113,8 @@ pub trait Container: Location {
 #[cfg(test)]
 mod tests {
     use error::silence_errors;
-    use handle::ID;
+    use object::ObjectID;
     use test::with_tmp_file;
-    use super::Container;
-    use location::Location;
 
     #[test]
     pub fn test_group() {

@@ -1,6 +1,6 @@
-use datatype::Datatype;
+use datatype::{Datatype, DatatypeID};
 use error::Result;
-use handle::{ID, FromID};
+use object::{ObjectID, ObjectDetail};
 use plist::PropertyList;
 
 use ffi::h5p::{
@@ -248,11 +248,12 @@ impl Filters {
             // scale-offset
             if let Some(offset) = self.scale_offset {
                 self.ensure_available("scaleoffset", H5Z_FILTER_SCALEOFFSET)?;
-                match *datatype {
-                    Datatype::Integer(_) => {
+                match *datatype.detail() {
+                    // FIXME: use type_descriptor() or type_class() here
+                    DatatypeID::Integer => {
                         H5Pset_scaleoffset(id, H5Z_SO_INT, offset as c_int);
                     },
-                    Datatype::Float(_) => {
+                    DatatypeID::Float => {
                         ensure!(offset > 0,
                             "Can only use positive scale-offset factor with floats");
                         H5Pset_scaleoffset(id, H5Z_SO_FLOAT_DSCALE, offset as c_int);

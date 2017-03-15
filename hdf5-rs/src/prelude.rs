@@ -10,9 +10,6 @@
 //! does not expose any structures or functions.
 
 
-pub use super::Object;
-pub use super::Location;
-pub use super::Container;
 pub use super::Dimension;
 pub use super::ToDatatype;
 

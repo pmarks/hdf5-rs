@@ -1,6 +1,5 @@
 use error::Result;
-use handle::{Handle, ID, FromID, get_id_type};
-use object::Object;
+use object::{Object, ObjectType, AllowTypes, ObjectID};
 
 use ffi::h5i::{H5I_DATATYPE, hid_t};
 use ffi::h5t::{
@@ -11,6 +10,7 @@ use ffi::h5t::{
 
 use libc::c_void;
 use std::fmt;
+use std::mem;
 
 #[cfg(target_endian = "big")]
 use globals::{
@@ -30,59 +30,48 @@ use globals::{
     H5T_IEEE_F32LE, H5T_IEEE_F64LE,
 };
 
-/// Represents the HDF5 datatype object.
-pub enum Datatype {
-    Integer(IntegerDatatype),
-    Float(FloatDatatype),
-}
-
 /// A trait for all HDF5 datatypes.
-pub trait AnyDatatype: ID {
+pub trait AnyDatatype : ObjectType {}
+
+impl<T: AnyDatatype> Object<T> {
     /// Get the total size of the datatype in bytes.
-    fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         h5call!(H5Tget_size(self.id())).unwrap_or(0) as usize
     }
 }
 
-impl AnyDatatype for Datatype {}
-impl<T> AnyDatatype for T where T: AtomicDatatype {}
-
 macro_rules! def_atomic {
-    ($name:ident, $h5t:ident) => (
-        pub struct $name {
-            handle: Handle,
-        }
+    ($name:ident -> $alias:ident, $h5t:ident, $desc:expr) => (
+        pub struct $name;
 
-        #[doc(hidden)]
-        impl ID for $name {
-            fn id(&self) -> hid_t {
-                self.handle.id()
+        impl ObjectType for $name {
+            fn allow_types() -> AllowTypes {
+                AllowTypes::Just(H5I_DATATYPE)
             }
-        }
 
-        #[doc(hidden)]
-        impl FromID for $name {
             fn from_id(id: hid_t) -> Result<$name> {
                 h5lock!({
-                    if get_id_type(id) != H5I_DATATYPE {
-                        return Err(From::from(format!("Invalid datatype id: {}", id)));
-                    }
                     let cls = H5Tget_class(id);
-                    if cls != $h5t {
-                        return Err(From::from(format!("Invalid datatype class: {:?}", cls)));
-                    }
-                    Ok($name { handle: Handle::new(id)? })
+                    ensure!(cls == $h5t, "Invalid datatype class: expected {:?}, got {:?}",
+                            $h5t, cls);
+                    Ok($name)
                 })
+            }
+
+            fn type_name() -> &'static str {
+                $desc
             }
         }
 
-        impl Object for $name {}
-        impl AtomicDatatype for $name{}
+        impl AnyDatatype for $name {}
+        impl AtomicDatatype for $name {}
+
+        pub type $alias = Object<$name>;
     )
 }
 
 /// A trait for integer scalar datatypes.
-def_atomic!(IntegerDatatype, H5T_INTEGER);
+def_atomic!(IntegerDatatypeID -> IntegerDatatype, H5T_INTEGER, "integer datatype");
 
 impl IntegerDatatype {
     /// Returns true if the datatype is signed.
@@ -92,27 +81,29 @@ impl IntegerDatatype {
 }
 
 /// A trait for floating-point scalar datatypes.
-def_atomic!(FloatDatatype, H5T_FLOAT);
+def_atomic!(FloatDatatypeID -> FloatDatatype, H5T_FLOAT, "float datatype");
 
 /// A trait for atomic scalar datatypes.
-pub trait AtomicDatatype: ID {
+pub trait AtomicDatatype : AnyDatatype {}
+
+impl<T: AtomicDatatype> Object<T> {
     /// Returns true if the datatype byte order is big endian.
-    fn is_be(&self) -> bool {
+    pub fn is_be(&self) -> bool {
         h5lock!(H5Tget_order(self.id()) == H5T_ORDER_BE)
     }
 
     /// Returns true if the datatype byte order is little endian.
-    fn is_le(&self) -> bool {
+    pub fn is_le(&self) -> bool {
         h5lock!(H5Tget_order(self.id()) == H5T_ORDER_LE)
     }
 
     /// Get the offset of the first significant bit.
-    fn offset(&self) -> usize {
+    pub fn offset(&self) -> usize {
         h5call!(H5Tget_offset(self.id())).unwrap_or(0) as usize
     }
 
     /// Get the number of significant bits, excluding padding.
-    fn precision(&self) -> usize {
+    pub fn precision(&self) -> usize {
         h5call!(H5Tget_precision(self.id())).unwrap_or(0) as usize
     }
 }
@@ -170,41 +161,91 @@ impl_atomic!(f64, H5T_IEEE_F64BE, H5T_IEEE_F64LE);
 #[cfg(target_pointer_width = "64")] impl_atomic!(usize, H5T_STD_U64BE, H5T_STD_U64LE);
 #[cfg(target_pointer_width = "64")] impl_atomic!(isize, H5T_STD_I64BE, H5T_STD_I64LE);
 
-#[doc(hidden)]
-impl ID for Datatype {
-    fn id(&self) -> hid_t {
-        match *self {
-            Datatype::Integer(ref dt) => dt.id(),
-            Datatype::Float(ref dt)   => dt.id(),
-        }
+pub enum DatatypeID {
+    Integer,
+    Float,
+}
+
+/// Represents the HDF5 datatype object.
+pub type Datatype = Object<DatatypeID>;
+
+impl ObjectType for DatatypeID {
+    fn allow_types() -> AllowTypes {
+        AllowTypes::Just(H5I_DATATYPE)
+    }
+
+    fn from_id(id: hid_t) -> Result<DatatypeID> {
+        h5lock!({
+            match H5Tget_class(id) {
+                H5T_INTEGER  => Ok(DatatypeID::Integer),
+                H5T_FLOAT    => Ok(DatatypeID::Float),
+                H5T_NO_CLASS |
+                H5T_NCLASSES => Err(From::from("Invalid datatype class")),
+                cls          => Err(From::from(format!("Unsupported datatype: {:?}", cls))),
+            }
+        })
+    }
+
+    fn type_name() -> &'static str {
+        "datatype"
     }
 }
 
-#[doc(hidden)]
-impl FromID for Datatype {
-    fn from_id(id: hid_t) -> Result<Datatype> {
+pub enum DatatypeClass<'a> {
+    Integer(&'a IntegerDatatype),
+    Float(&'a FloatDatatype),
+}
+
+impl Datatype {
+    pub fn class<'a>(&'a self) -> Result<DatatypeClass<'a>> {
         h5lock!({
-            match get_id_type(id) {
-                H5I_DATATYPE => {
-                    match H5Tget_class(id) {
-                        H5T_INTEGER  => Ok(Datatype::Integer(IntegerDatatype::from_id(id)?)),
-                        H5T_FLOAT    => Ok(Datatype::Float(FloatDatatype::from_id(id)?)),
-                        H5T_NO_CLASS |
-                        H5T_NCLASSES => Err(From::from("Invalid datatype class")),
-                        cls          => Err(From::from(format!("Unsupported datatype: {:?}", cls)))
-                    }
-                },
-                _ => Err(From::from(format!("Invalid datatype id: {}", id))),
+            match H5Tget_class(self.id()) {
+                H5T_INTEGER  => Ok(DatatypeClass::Integer(mem::transmute(self))),
+                H5T_FLOAT    => Ok(DatatypeClass::Float(mem::transmute(self))),
+                H5T_NO_CLASS |
+                H5T_NCLASSES => Err(From::from("Invalid datatype class")),
+                cls          => Err(From::from(format!("Unsupported datatype: {:?}", cls))),
             }
         })
     }
 }
 
-impl Object for Datatype {}
+impl AnyDatatype for DatatypeID {}
 
 impl PartialEq for Datatype {
     fn eq(&self, other: &Datatype) -> bool {
         h5call!(H5Tequal(self.id(), other.id())).unwrap_or(0) == 1
+    }
+}
+
+impl fmt::Debug for IntegerDatatype {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl fmt::Display for IntegerDatatype {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if !self.is_valid() {
+            return "<HDF5 datatype: invalid id>".fmt(f);
+        }
+        format!("<HDF5 datatype: {}-bit {}signed integer>",
+                self.precision(), if self.is_signed() { "" } else { "un" }).fmt(f)
+    }
+}
+
+impl fmt::Debug for FloatDatatype {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl fmt::Display for FloatDatatype {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if !self.is_valid() {
+            return "<HDF5 datatype: invalid id>".fmt(f);
+        }
+        format!("<HDF5 datatype: {}-bit float>", self.precision()).fmt(f)
     }
 }
 
@@ -219,22 +260,23 @@ impl fmt::Display for Datatype {
         if !self.is_valid() {
             return "<HDF5 datatype: invalid id>".fmt(f);
         }
-        format!("<HDF5 datatype: {}>", match *self {
-            Datatype::Integer(ref dt) => format!("{}-bit {}signed integer", dt.precision(),
-                                            if dt.is_signed() { "" } else { "un" }),
-            Datatype::Float(ref dt)   => format!("{}-bit float", dt.precision()),
-            // _ => "unknown",
-        }).fmt(f)
+        match self.class() {
+            Ok(dt) => match dt {
+                DatatypeClass::Integer(dt) => dt.fmt(f),
+                DatatypeClass::Float(dt) => dt.fmt(f),
+            },
+            Err(_) => "<HDF5 datatype: invalid class>".fmt(f),
+        }
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use super::{Datatype, AnyDatatype, AtomicDatatype, ToDatatype};
-    use handle::FromID;
+    use super::{Datatype, DatatypeClass, ToDatatype};
     use ffi::h5i::H5I_INVALID_HID;
     use ffi::h5t::H5Tcopy;
     use globals::H5T_STD_REF_OBJ;
+    use object::ObjectID;
 
     #[cfg(target_endian = "big")] const IS_BE: bool = true;
     #[cfg(target_endian = "big")] const IS_LE: bool = false;
@@ -247,8 +289,12 @@ pub mod tests {
 
     #[test]
     pub fn test_invalid_datatype() {
-        assert_err!(Datatype::from_id(H5I_INVALID_HID), "Invalid datatype id");
-        assert_err!(Datatype::from_id(h5lock!(H5Tcopy(*H5T_STD_REF_OBJ))), "Unsupported datatype");
+        unsafe {
+            assert_err!(Datatype::from_id(H5I_INVALID_HID),
+                        "Invalid datatype id");
+            assert_err!(Datatype::from_id(h5lock!(H5Tcopy(*H5T_STD_REF_OBJ))),
+                        "Unsupported datatype");
+        }
     }
 
     #[test]
@@ -260,8 +306,8 @@ pub mod tests {
     #[test]
     pub fn test_atomic_datatype() {
         fn test_integer<T: ToDatatype>(signed: bool, precision: usize, size: usize) {
-            match <T as ToDatatype>::to_datatype().unwrap() {
-                Datatype::Integer(dt) => {
+            match <T as ToDatatype>::to_datatype().unwrap().class().unwrap() {
+                DatatypeClass::Integer(dt) => {
                     assert_eq!(dt.is_be(), IS_BE);
                     assert_eq!(dt.is_le(), IS_LE);
                     assert_eq!(dt.offset(), 0);
@@ -274,8 +320,8 @@ pub mod tests {
         }
 
         fn test_float<T: ToDatatype>(precision: usize, size: usize) {
-            match <T as ToDatatype>::to_datatype().unwrap() {
-                Datatype::Float(dt) => {
+            match <T as ToDatatype>::to_datatype().unwrap().class().unwrap() {
+                DatatypeClass::Float(dt) => {
                     assert_eq!(dt.is_be(), IS_BE);
                     assert_eq!(dt.is_le(), IS_LE);
                     assert_eq!(dt.offset(), 0);

@@ -1,6 +1,5 @@
 use error::Result;
-use handle::{Handle, ID, FromID, get_id_type};
-use object::Object;
+use object::{Object, ObjectType, AllowTypes, ObjectID};
 use types::{
     TypeDescriptor, H5Type, IntSize, FloatSize, EnumMember,
     EnumType, CompoundField, CompoundType
@@ -40,28 +39,24 @@ use globals::{
 
 use globals::{H5T_NATIVE_INT8, H5T_C_S1};
 
-pub struct Datatype {
-    handle: Handle,
-}
+pub struct DatatypeID;
 
-#[doc(hidden)]
-impl ID for Datatype {
-    fn id(&self) -> hid_t {
-        self.handle.id()
+impl ObjectType for DatatypeID {
+    fn allow_types() -> AllowTypes {
+        AllowTypes::Just(H5I_DATATYPE)
+    }
+
+    fn from_id(_: hid_t) -> Result<DatatypeID> {
+        Ok(DatatypeID)
+    }
+
+    fn type_name() -> &'static str {
+        "datatype"
     }
 }
 
-#[doc(hidden)]
-impl FromID for Datatype {
-    fn from_id(id: hid_t) -> Result<Datatype> {
-        h5lock!(match get_id_type(id) {
-            H5I_DATATYPE => Ok(Datatype { handle: Handle::new(id)? }),
-            _ => Err(From::from(format!("Invalid datatype id: {}", id))),
-        })
-    }
-}
-
-impl Object for Datatype { }
+/// Represents the HDF5 datatype object.
+pub type Datatype = Object<DatatypeID>;
 
 fn datatype_to_descriptor(datatype: &Datatype) -> Result<TypeDescriptor> {
     use ffi::h5t::H5T_class_t::*;

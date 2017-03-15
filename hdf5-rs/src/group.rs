@@ -1,17 +1,33 @@
 use ffi::h5i::{H5I_GROUP, hid_t};
 
 use error::Result;
-use handle::{Handle, ID, FromID, get_id_type};
-use object::Object;
-use container::Container;
-use location::Location;
+use object::{Object, ObjectType, AllowTypes};
+use container::ContainerType;
+use location::LocationType;
 
 use std::fmt;
 
-/// Represents the HDF5 group object.
-pub struct Group {
-    handle: Handle,
+pub struct GroupID;
+
+impl ObjectType for GroupID {
+    fn allow_types() -> AllowTypes {
+        AllowTypes::Just(H5I_GROUP)
+    }
+
+    fn from_id(_: hid_t) -> Result<GroupID> {
+        Ok(GroupID)
+    }
+
+    fn type_name() -> &'static str {
+        "group"
+    }
 }
+
+/// Represents the HDF5 group object.
+pub type Group = Object<GroupID>;
+
+impl LocationType for GroupID {}
+impl ContainerType for GroupID {}
 
 impl fmt::Debug for Group {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -33,32 +49,8 @@ impl fmt::Display for Group {
     }
 }
 
-#[doc(hidden)]
-impl ID for Group {
-    fn id(&self) -> hid_t {
-        self.handle.id()
-    }
-}
-
-#[doc(hidden)]
-impl FromID for Group {
-    fn from_id(id: hid_t) -> Result<Group> {
-        match get_id_type(id) {
-            H5I_GROUP => Ok(Group { handle: Handle::new(id)? }),
-            _ => Err(From::from(format!("Invalid group id: {}", id))),
-        }
-    }
-}
-
-impl Object for Group {}
-
-impl Location for Group {}
-
-impl Container for Group {}
-
 #[cfg(test)]
 pub mod tests {
-    use container::Container;
     use test::with_tmp_file;
 
     #[test]

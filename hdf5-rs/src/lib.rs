@@ -2,19 +2,20 @@
 #![cfg_attr(feature = "clippy", plugin(clippy))]
 #![cfg_attr(feature = "clippy", allow(block_in_if_condition_stmt))]
 #![cfg_attr(feature = "clippy", allow(needless_return))]
+#![cfg_attr(feature = "clippy", allow(zero_ptr))]
 #![cfg_attr(all(feature = "clippy", test), allow(cyclomatic_complexity))]
 #![cfg_attr(not(test), allow(dead_code))]
 
-pub use container::Container;
 pub use dataset::Dataset;
 pub use datatype::{Datatype, ToDatatype};
 pub use error::{Result, Error};
 pub use file::File;
 pub use filters::Filters;
 pub use group::Group;
-pub use location::Location;
-pub use object::Object;
 pub use space::{Dimension, Ix, Dataspace};
+
+/// Any HDF5 object that can be referenced through an identifier.
+pub type Object = object::Object<()>;
 
 extern crate libc;
 extern crate num;

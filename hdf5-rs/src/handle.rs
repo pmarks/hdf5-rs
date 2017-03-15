@@ -3,7 +3,6 @@ use ffi::h5i::{hid_t, H5I_type_t, H5Iget_type, H5Iis_valid, H5Iinc_ref, H5Idec_r
 use ffi::h5i::H5I_type_t::*;
 
 use error::Result;
-use object::Object;
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::collections::HashMap;
@@ -27,14 +26,6 @@ pub fn is_valid_user_id(id: hid_t) -> bool {
     h5lock!({
         H5Iis_valid(id) == 1
     })
-}
-
-pub trait ID: Sized {
-    fn id(&self) -> hid_t;
-}
-
-pub trait FromID: Sized {
-    fn from_id(id: hid_t) -> Result<Self>;
 }
 
 struct Registry {
@@ -110,13 +101,17 @@ impl Handle {
             }
         })
     }
+
+    pub fn is_valid(&self) -> bool {
+        is_valid_user_id(self.id())
+    }
 }
 
 impl Clone for Handle {
     fn clone(&self) -> Handle {
         h5lock!({
             self.incref();
-            Handle::from_id(self.id()).unwrap_or(Handle::invalid())
+            Handle::new(self.id()).unwrap_or(Handle::invalid())
         })
     }
 }
@@ -126,17 +121,3 @@ impl Drop for Handle {
         h5lock!(self.decref());
     }
 }
-
-impl ID for Handle {
-    fn id(&self) -> hid_t {
-        self.id()
-    }
-}
-
-impl FromID for Handle {
-    fn from_id(id: hid_t) -> Result<Handle> {
-        Handle::new(id)
-    }
-}
-
-impl Object for Handle {}

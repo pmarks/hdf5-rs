@@ -1,14 +1,35 @@
 use std::fmt;
 
-use ffi::h5i::{H5I_GENPROP_LST, H5I_INVALID_HID, hid_t};
+use ffi::h5i::{H5I_GENPROP_LST, hid_t};
 use ffi::h5p::{H5Pcopy, H5Pequal};
 
 use error::Result;
-use handle::{Handle, ID, FromID, get_id_type};
-use object::Object;
+use object::{Object, ObjectType, AllowTypes, ObjectID};
 
-pub struct PropertyList {
-    handle: Handle,
+pub struct PropertyListID;
+
+impl ObjectType for PropertyListID {
+    fn allow_types() -> AllowTypes {
+        AllowTypes::Just(H5I_GENPROP_LST)
+    }
+
+    fn from_id(_: hid_t) -> Result<PropertyListID> {
+        Ok(PropertyListID)
+    }
+
+    fn type_name() -> &'static str {
+        "property list"
+    }
+}
+
+/// Represents the HDF5 group object.
+pub type PropertyList = Object<PropertyListID>;
+
+impl PropertyList {
+    /// Copy the property list.
+    pub fn copy(&self) -> Result<PropertyList> {
+        PropertyList::from_id(h5try!(H5Pcopy(self.id())))
+    }
 }
 
 impl fmt::Debug for PropertyList {
@@ -27,32 +48,6 @@ impl fmt::Display for PropertyList {
     }
 }
 
-#[doc(hidden)]
-impl ID for PropertyList {
-    fn id(&self) -> hid_t {
-        self.handle.id()
-    }
-}
-
-#[doc(hidden)]
-impl FromID for PropertyList {
-    fn from_id(id: hid_t) -> Result<PropertyList> {
-        match get_id_type(id) {
-            H5I_GENPROP_LST => Ok(PropertyList { handle: Handle::new(id)? }),
-            _ => Err(From::from(format!("Invalid property list id: {}", id))),
-        }
-    }
-}
-
-impl Object for PropertyList {}
-
-impl Clone for PropertyList {
-    fn clone(&self) -> PropertyList {
-        let id = h5call!(H5Pcopy(self.id())).unwrap_or(H5I_INVALID_HID);
-        PropertyList::from_id(id).unwrap_or(PropertyList { handle: Handle::invalid() })
-    }
-}
-
 impl PartialEq for PropertyList {
     fn eq(&self, other: &PropertyList) -> bool {
         h5call!(H5Pequal(self.id(), other.id())).unwrap_or(0) == 1
@@ -64,8 +59,7 @@ pub mod tests {
     use super::PropertyList;
     use globals::{H5P_FILE_ACCESS, H5P_FILE_CREATE};
     use ffi::h5p::H5Pcreate;
-    use handle::{ID, FromID};
-    use object::Object;
+    use object::ObjectID;
 
     #[test]
     pub fn test_clone_eq() {
@@ -74,7 +68,7 @@ pub mod tests {
         assert!(fapl.is_valid());
         assert!(fcpl.is_valid());
         assert_ne!(fapl, fcpl);
-        let fapl_c = fapl.clone();
+        let fapl_c = fapl.copy().unwrap();
         assert!(fapl.is_valid());
         assert!(fapl_c.is_valid());
         assert_eq!(fapl.refcount(), 1);

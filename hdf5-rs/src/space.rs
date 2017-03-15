@@ -1,11 +1,10 @@
 use ffi::h5::hsize_t;
-use ffi::h5i::{H5I_DATASPACE, H5I_INVALID_HID, hid_t};
+use ffi::h5i::{H5I_DATASPACE, hid_t};
 use ffi::h5s::{H5S_UNLIMITED, H5Sget_simple_extent_dims, H5Sget_simple_extent_ndims, H5Scopy,
                H5Screate_simple};
 
 use error::Result;
-use handle::{Handle, ID, FromID, get_id_type};
-use object::Object;
+use object::{Object, ObjectType, AllowTypes, ObjectID};
 
 use std::{fmt, ptr, slice};
 use libc::c_int;
@@ -73,10 +72,24 @@ impl Dimension for Ix {
     fn dims(&self) -> Vec<Ix> { vec![*self] }
 }
 
-/// Represents the HDF5 dataspace object.
-pub struct Dataspace {
-    handle: Handle,
+pub struct DataspaceID;
+
+impl ObjectType for DataspaceID {
+    fn allow_types() -> AllowTypes {
+        AllowTypes::Just(H5I_DATASPACE)
+    }
+
+    fn from_id(_: hid_t) -> Result<DataspaceID> {
+        Ok(DataspaceID)
+    }
+
+    fn type_name() -> &'static str {
+        "dataspace"
+    }
 }
+
+/// Represents the HDF5 dataspace object.
+pub type Dataspace = Object<DataspaceID>;
 
 impl Dataspace {
     pub fn new<D: Dimension>(d: D, resizable: bool) -> Result<Dataspace> {
@@ -109,14 +122,16 @@ impl Dataspace {
     pub fn resizable(&self) -> bool {
         self.maxdims().iter().any(|&x| x == H5S_UNLIMITED as Ix )
     }
-}
 
-impl Dimension for Dataspace {
-    fn ndim(&self) -> usize {
+    pub fn copy(&self) -> Result<Dataspace> {
+        Dataspace::from_id(h5try!(H5Scopy(self.id())))
+    }
+
+    pub fn ndim(&self) -> usize {
         h5call!(H5Sget_simple_extent_ndims(self.id())).unwrap_or(0) as usize
     }
 
-    fn dims(&self) -> Vec<Ix> {
+    pub fn dims(&self) -> Vec<Ix> {
         let ndim = self.ndim();
         if ndim > 0 {
             let mut dims: Vec<hsize_t> = Vec::with_capacity(ndim);
@@ -129,31 +144,10 @@ impl Dimension for Dataspace {
         }
         vec![]
     }
-}
 
-#[doc(hidden)]
-impl ID for Dataspace {
-    fn id(&self) -> hid_t {
-        self.handle.id()
-    }
-}
-
-#[doc(hidden)]
-impl FromID for Dataspace {
-    fn from_id(id: hid_t) -> Result<Dataspace> {
-        match get_id_type(id) {
-            H5I_DATASPACE => Ok(Dataspace { handle: Handle::new(id)? }),
-            _ => Err(From::from(format!("Invalid dataspace id: {}", id))),
-        }
-    }
-}
-
-impl Object for Dataspace {}
-
-impl Clone for Dataspace {
-    fn clone(&self) -> Dataspace {
-        let id = h5call!(H5Scopy(self.id())).unwrap_or(H5I_INVALID_HID);
-        Dataspace::from_id(id).unwrap_or(Dataspace { handle: Handle::invalid() })
+    pub fn size(&self) -> Ix {
+        let dims = self.dims();
+        if dims.is_empty() { 1 } else { dims.iter().fold(1, |acc, &el| acc * el) }
     }
 }
 
@@ -186,10 +180,9 @@ impl fmt::Display for Dataspace {
 pub mod tests {
     use super::{Dimension, Ix, Dataspace};
     use error::silence_errors;
-    use handle::{ID, FromID};
-    use object::Object;
     use ffi::h5i::H5I_INVALID_HID;
     use ffi::h5s::H5S_UNLIMITED;
+    use object::ObjectID;
 
     #[test]
     pub fn test_dimension() {
@@ -236,7 +229,7 @@ pub mod tests {
 
         assert_err!(Dataspace::from_id(H5I_INVALID_HID), "Invalid dataspace id");
 
-        let dc = d.clone();
+        let dc = d.copy().unwrap();
         assert!(dc.is_valid());
         assert_ne!(dc.id(), d.id());
         assert_eq!((d.ndim(), d.dims(), d.size()), (dc.ndim(), dc.dims(), dc.size()));

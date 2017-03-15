@@ -10,11 +10,11 @@ use ffi::h5fd::{H5Pset_fapl_sec2, H5Pset_fapl_stdio, H5Pset_fapl_core};
 
 use globals::{H5P_FILE_CREATE, H5P_FILE_ACCESS};
 
-use container::Container;
+use container::ContainerType;
 use error::Result;
-use location::Location;
-use object::Object;
-use handle::{Handle, ID, FromID, get_id_type};
+use location::LocationType;
+use object::{Object, ObjectType, AllowTypes, ObjectDetail, ObjectID};
+use handle::Handle;
 use plist::PropertyList;
 use util::to_cstring;
 
@@ -24,39 +24,29 @@ use std::process::Command;
 
 use libc::{size_t, c_uint};
 
-/// Represents the HDF5 file object.
-pub struct File {
-    handle: Handle,
+pub struct FileID {
     fcpl: PropertyList,
 }
 
-#[doc(hidden)]
-impl ID for File {
-    fn id(&self) -> hid_t {
-        self.handle.id()
+impl ObjectType for FileID {
+    fn allow_types() -> AllowTypes {
+        AllowTypes::Just(H5I_FILE)
+    }
+
+    fn from_id(id: hid_t) -> Result<FileID> {
+        Ok(FileID { fcpl: PropertyList::from_id(h5try!(H5Fget_create_plist(id)))? })
+    }
+
+    fn type_name() -> &'static str {
+        "file"
     }
 }
 
-#[doc(hidden)]
-impl FromID for File {
-    fn from_id(id: hid_t) -> Result<File> {
-        h5lock!({
-            match get_id_type(id) {
-                H5I_FILE => Ok(File {
-                    handle: Handle::new(id)?,
-                    fcpl: PropertyList::from_id(h5try!(H5Fget_create_plist(id)))?,
-                 }),
-                _ => Err(From::from(format!("Invalid file id: {}", id))),
-            }
-        })
-    }
-}
+impl LocationType for FileID {}
+impl ContainerType for FileID {}
 
-impl Object for File {}
-
-impl Location for File {}
-
-impl Container for File {}
+/// Represents the HDF5 file object.
+pub type File = Object<FileID>;
 
 impl File {
     /// Create a new file object.
@@ -110,7 +100,7 @@ impl File {
     pub fn userblock(&self) -> u64 {
         unsafe {
             let userblock: *mut hsize_t = &mut 0;
-            h5lock!(H5Pget_userblock(self.fcpl.id(), userblock));
+            h5lock!(H5Pget_userblock(self.detail().fcpl.id(), userblock));
             *userblock as u64
         }
     }
@@ -142,7 +132,7 @@ impl File {
             let file_ids = self.get_obj_ids(H5F_OBJ_FILE);
             let object_ids = self.get_obj_ids(H5F_OBJ_ALL & !H5F_OBJ_FILE);
             for file_id in &file_ids {
-                let handle = Handle::from_id(*file_id);
+                let handle = Handle::new(*file_id);
                 if let Ok(handle) = handle {
                     while handle.is_valid() {
                         handle.decref();
@@ -150,7 +140,7 @@ impl File {
                 }
             }
             for object_id in &object_ids {
-                let handle = Handle::from_id(*object_id);
+                let handle = Handle::new(*object_id);
                 if let Ok(handle) = handle {
                     while handle.is_valid() {
                         handle.decref();
@@ -159,9 +149,9 @@ impl File {
             }
             unsafe { H5Fclose(self.id()); }
             while self.is_valid() {
-                self.handle.decref();
+                self.decref();
             }
-            self.handle.decref();
+            self.decref();
         })
     }
 }
@@ -298,10 +288,7 @@ impl FileBuilder {
 #[cfg(test)]
 pub mod tests {
     use super::{File, FileBuilder};
-    use container::Container;
     use error::silence_errors;
-    use location::Location;
-    use object::Object;
     use test::{with_tmp_dir, with_tmp_path, with_tmp_file};
 
     use std::fs;

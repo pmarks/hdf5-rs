@@ -11,13 +11,13 @@ use ffi::h5p::{
 };
 use globals::H5P_LINK_CREATE;
 
-use container::Container;
-use datatype::{Datatype, ToDatatype, AnyDatatype};
+use container::ContainerType;
+use datatype::{Datatype, ToDatatype};
 use error::Result;
 use filters::Filters;
-use handle::{Handle, ID, FromID, get_id_type};
-use location::Location;
-use object::Object;
+use handle::Handle;
+use location::LocationType;
+use object::{Object, ObjectType, AllowTypes, ObjectDetail, ObjectID};
 use plist::PropertyList;
 use space::{Dataspace, Dimension, Ix};
 use util::to_cstring;
@@ -34,44 +34,31 @@ pub enum Chunk {
     Manual(Vec<Ix>)
 }
 
-/// Represents the HDF5 dataset object.
-pub struct Dataset {
-    handle: Handle,
+pub struct DatasetID {
     dcpl: PropertyList,
     filters: Filters,
 }
 
-#[doc(hidden)]
-impl ID for Dataset {
-    fn id(&self) -> hid_t {
-        self.handle.id()
+impl ObjectType for DatasetID {
+    fn allow_types() -> AllowTypes {
+        AllowTypes::Just(H5I_DATASET)
+    }
+
+    fn from_id(id: hid_t) -> Result<DatasetID> {
+        let dcpl = PropertyList::from_id(h5try!(H5Dget_create_plist(id)))?;
+        let filters = Filters::from_dcpl(&dcpl)?;
+        Ok(DatasetID {dcpl: dcpl, filters: filters })
+    }
+
+    fn type_name() -> &'static str {
+        "file"
     }
 }
 
-#[doc(hidden)]
-impl FromID for Dataset {
-    fn from_id(id: hid_t) -> Result<Dataset> {
-        h5lock!({
-            match get_id_type(id) {
-                H5I_DATASET => {
-                    let handle = Handle::new(id)?;
-                    let dcpl = PropertyList::from_id(h5try!(H5Dget_create_plist(id)))?;
-                    let filters = Filters::from_dcpl(&dcpl)?;
-                    Ok(Dataset {
-                        handle: handle,
-                        dcpl: dcpl,
-                        filters: filters,
-                    })
-                },
-                _ => Err(From::from(format!("Invalid property list id: {}", id))),
-            }
-        })
-    }
-}
+impl LocationType for DatasetID {}
 
-impl Object for Dataset {}
-
-impl Location for Dataset {}
+/// Represents the HDF5 dataset object.
+pub type Dataset = Object<DatasetID>;
 
 impl Dataset {
     /// Returns the shape of the dataset.
@@ -103,7 +90,7 @@ impl Dataset {
 
     /// Returns whether this dataset has a chunked layout.
     pub fn is_chunked(&self) -> bool {
-        h5lock!(H5Pget_layout(self.dcpl.id()) == H5D_layout_t::H5D_CHUNKED)
+        h5lock!(H5Pget_layout(self.detail().dcpl.id()) == H5D_layout_t::H5D_CHUNKED)
     }
 
     /// Returns whether this dataset's type is equivalent to the given type.
@@ -125,7 +112,7 @@ impl Dataset {
                     let ndim = self.ndim();
                     let mut dims: Vec<hsize_t> = Vec::with_capacity(ndim);
                     dims.set_len(ndim);
-                    H5Pget_chunk(self.dcpl.id(), ndim as c_int, dims.as_mut_ptr());
+                    H5Pget_chunk(self.detail().dcpl.id(), ndim as c_int, dims.as_mut_ptr());
                     dims.iter().map(|&x| x as Ix).collect()
                 })
             } else {
@@ -136,14 +123,14 @@ impl Dataset {
 
     /// Returns the filters used to create the dataset.
     pub fn filters(&self) -> Filters {
-        self.filters.clone()
+        self.detail().filters.clone()
     }
 
     /// Returns `true` if object modification time is tracked by the dataset.
     pub fn tracks_times(&self) -> bool {
         unsafe {
             let track_times: *mut hbool_t = &mut 0;
-            h5lock!(H5Pget_obj_track_times(self.dcpl.id(), track_times));
+            h5lock!(H5Pget_obj_track_times(self.detail().dcpl.id(), track_times));
             *track_times == 1
         }
     }
@@ -167,14 +154,14 @@ impl Dataset {
     pub fn fill_value<T: ToDatatype>(&self) -> Result<Option<T>> {
         h5lock!({
             let defined: *mut H5D_fill_value_t = &mut H5D_fill_value_t::H5D_FILL_VALUE_UNDEFINED;
-            h5try!(H5Pfill_value_defined(self.dcpl.id(), defined));
+            h5try!(H5Pfill_value_defined(self.detail().dcpl.id(), defined));
             match *defined {
                 H5D_fill_value_t::H5D_FILL_VALUE_ERROR => fail!("Invalid fill value"),
                 H5D_fill_value_t::H5D_FILL_VALUE_UNDEFINED => Ok(None),
                 _ => {
                     let datatype = T::to_datatype()?;
                     let buf: *mut c_void = libc::malloc(datatype.size() as size_t);
-                    h5try!(H5Pget_fill_value(self.dcpl.id(), datatype.id(), buf));
+                    h5try!(H5Pget_fill_value(self.detail().dcpl.id(), datatype.id(), buf));
                     let result = Ok(Some(T::from_raw_ptr(buf)));
                     libc::free(buf);
                     result
@@ -205,7 +192,7 @@ pub struct DatasetBuilder<T> {
 
 impl<T: ToDatatype> DatasetBuilder<T> {
     /// Create a new dataset builder and bind it to the parent container.
-    pub fn new<C: Container>(parent: &C) -> DatasetBuilder<T> {
+    pub fn new<C: ContainerType>(parent: &Object<C>) -> DatasetBuilder<T> {
         h5lock!({
             // Store the reference to the parent handle and try to increase its reference count.
             let handle = Handle::new(parent.id());
@@ -433,13 +420,10 @@ pub mod tests {
     use ffi::h5d::H5Dwrite;
     use ffi::h5s::H5S_ALL;
     use ffi::h5p::H5P_DEFAULT;
-    use container::Container;
     use datatype::ToDatatype;
     use file::File;
     use filters::{Filters, gzip_available, szip_available};
-    use handle::ID;
-    use location::Location;
-    use object::Object;
+    use object::ObjectID;
     use test::{with_tmp_file, with_tmp_path};
     use libc::c_void;
     use std::io::Read;
