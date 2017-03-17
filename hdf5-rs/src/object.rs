@@ -5,6 +5,7 @@ use handle::{Handle, get_id_type};
 
 use std::fmt;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AllowTypes {
     Any,
     Just(H5I_type_t),
