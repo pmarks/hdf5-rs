@@ -9,3 +9,5 @@ Cargo.lock
 *.swp
 .vagrant/
 /tmp/
+*.ipynb
+.ipynb-checkpoints
