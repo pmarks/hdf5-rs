@@ -3,6 +3,8 @@ use ffi::h5i::{H5I_type_t, H5Iget_ref, hid_t};
 use error::Result;
 use handle::{Handle, get_id_type};
 
+use std::fmt;
+
 pub enum AllowTypes {
     Any,
     Just(H5I_type_t),
@@ -13,6 +15,26 @@ pub trait ObjectType : Sized {
     fn allow_types() -> AllowTypes;
     fn from_id(id: hid_t) -> Result<Self>;
     fn type_name() -> &'static str;
+
+    fn describe(_: &Object<Self>) -> String {
+        "".to_owned()
+    }
+}
+
+impl<T: ObjectType> fmt::Debug for Object<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let out = if !self.is_valid() {
+            format!("<HDF5 {}: invalid id>", T::type_name())
+        } else {
+            let desc = T::describe(self);
+            if desc.is_empty() {
+                format!("<HDF5 {}>", T::type_name())
+            } else {
+                format!("<HDF5 {}: {}>", T::type_name(), desc)
+            }
+        };
+        fmt::Display::fmt(&out, f)
+    }
 }
 
 impl ObjectType for () {
@@ -137,6 +159,10 @@ pub mod tests {
         fn type_name() -> &'static str {
             "test object"
         }
+
+        fn describe(_: &TestObject) -> String {
+            "foo".to_owned()
+        }
     }
 
     type TestObject = Object<TestObjectID>;
@@ -149,6 +175,13 @@ pub mod tests {
         fn decref(&self) {
             self.handle.decref()
         }
+    }
+
+    #[test]
+    pub fn test_debug() {
+        let obj = TestObject::from_id(
+            h5call!(H5Pcreate(*H5P_FILE_ACCESS)).unwrap()).unwrap();
+        assert_eq!(format!("{:?}", obj), "<HDF5 test object: foo>");
     }
 
     #[test]

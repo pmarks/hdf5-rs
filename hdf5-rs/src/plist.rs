@@ -1,5 +1,3 @@
-use std::fmt;
-
 use ffi::h5i::{H5I_GENPROP_LST, hid_t};
 use ffi::h5p::{H5Pcopy, H5Pequal};
 
@@ -29,22 +27,6 @@ impl PropertyList {
     /// Copy the property list.
     pub fn copy(&self) -> Result<PropertyList> {
         PropertyList::from_id(h5try!(H5Pcopy(self.id())))
-    }
-}
-
-impl fmt::Debug for PropertyList {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for PropertyList {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_valid() {
-            "<HDF5 property list: invalid id>".fmt(f)
-        } else {
-            "<HDF5 property list>".fmt(f)
-        }
     }
 }
 

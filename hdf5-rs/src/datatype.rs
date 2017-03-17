@@ -9,7 +9,6 @@ use ffi::h5t::{
 };
 
 use libc::c_void;
-use std::fmt;
 use std::mem;
 
 #[cfg(target_endian = "big")]
@@ -41,7 +40,7 @@ impl<T: AnyDatatype> Object<T> {
 }
 
 macro_rules! def_atomic {
-    ($name:ident -> $alias:ident, $h5t:ident, $desc:expr) => (
+    ($name:ident -> $alias:ident, $h5t:ident, $desc:expr, $describe:expr) => (
         pub struct $name;
 
         impl ObjectType for $name {
@@ -61,6 +60,11 @@ macro_rules! def_atomic {
             fn type_name() -> &'static str {
                 $desc
             }
+
+            #[cfg_attr(feature = "clippy", allow(redundant_closure_call))]
+            fn describe(obj: &$alias) -> String {
+                ($describe)(obj)
+            }
         }
 
         impl AnyDatatype for $name {}
@@ -71,7 +75,11 @@ macro_rules! def_atomic {
 }
 
 /// A trait for integer scalar datatypes.
-def_atomic!(IntegerDatatypeID -> IntegerDatatype, H5T_INTEGER, "integer datatype");
+def_atomic!(IntegerDatatypeID -> IntegerDatatype, H5T_INTEGER, "integer datatype",
+            |obj: &IntegerDatatype| {
+                format!("{}int{}",
+                        if obj.is_signed() { "" } else { "u" }, obj.precision())
+            });
 
 impl IntegerDatatype {
     /// Returns true if the datatype is signed.
@@ -81,7 +89,10 @@ impl IntegerDatatype {
 }
 
 /// A trait for floating-point scalar datatypes.
-def_atomic!(FloatDatatypeID -> FloatDatatype, H5T_FLOAT, "float datatype");
+def_atomic!(FloatDatatypeID -> FloatDatatype, H5T_FLOAT, "float datatype",
+            |obj: &FloatDatatype| {
+                format!("float{}", obj.precision())
+            });
 
 /// A trait for atomic scalar datatypes.
 pub trait AtomicDatatype : AnyDatatype {}
@@ -189,6 +200,16 @@ impl ObjectType for DatatypeID {
     fn type_name() -> &'static str {
         "datatype"
     }
+
+    fn describe(obj: &Datatype) -> String {
+        match obj.class() {
+            Ok(dt) => match dt {
+                DatatypeClass::Integer(dt) => IntegerDatatypeID::describe(dt),
+                DatatypeClass::Float(dt) => FloatDatatypeID::describe(dt),
+            },
+            Err(_) => "invalid class".to_owned()
+        }
+    }
 }
 
 pub enum DatatypeClass<'a> {
@@ -215,58 +236,6 @@ impl AnyDatatype for DatatypeID {}
 impl PartialEq for Datatype {
     fn eq(&self, other: &Datatype) -> bool {
         h5call!(H5Tequal(self.id(), other.id())).unwrap_or(0) == 1
-    }
-}
-
-impl fmt::Debug for IntegerDatatype {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for IntegerDatatype {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_valid() {
-            return "<HDF5 datatype: invalid id>".fmt(f);
-        }
-        format!("<HDF5 datatype: {}-bit {}signed integer>",
-                self.precision(), if self.is_signed() { "" } else { "un" }).fmt(f)
-    }
-}
-
-impl fmt::Debug for FloatDatatype {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for FloatDatatype {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_valid() {
-            return "<HDF5 datatype: invalid id>".fmt(f);
-        }
-        format!("<HDF5 datatype: {}-bit float>", self.precision()).fmt(f)
-    }
-}
-
-impl fmt::Debug for Datatype {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for Datatype {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_valid() {
-            return "<HDF5 datatype: invalid id>".fmt(f);
-        }
-        match self.class() {
-            Ok(dt) => match dt {
-                DatatypeClass::Integer(dt) => dt.fmt(f),
-                DatatypeClass::Float(dt) => dt.fmt(f),
-            },
-            Err(_) => "<HDF5 datatype: invalid class>".fmt(f),
-        }
     }
 }
 
@@ -350,20 +319,12 @@ pub mod tests {
     }
 
     #[test]
-    pub fn test_debug_display() {
-        assert_eq!(format!("{}", u32::to_datatype().unwrap()),
-            "<HDF5 datatype: 32-bit unsigned integer>");
+    pub fn test_debug() {
         assert_eq!(format!("{:?}", u32::to_datatype().unwrap()),
-            "<HDF5 datatype: 32-bit unsigned integer>");
-
-        assert_eq!(format!("{}", i8::to_datatype().unwrap()),
-            "<HDF5 datatype: 8-bit signed integer>");
-        assert_eq!(format!("{}", i8::to_datatype().unwrap()),
-            "<HDF5 datatype: 8-bit signed integer>");
-
-        assert_eq!(format!("{}", f64::to_datatype().unwrap()),
-            "<HDF5 datatype: 64-bit float>");
+            "<HDF5 datatype: uint32>");
+        assert_eq!(format!("{:?}", i8::to_datatype().unwrap()),
+            "<HDF5 datatype: int8>");
         assert_eq!(format!("{:?}", f64::to_datatype().unwrap()),
-            "<HDF5 datatype: 64-bit float>");
+            "<HDF5 datatype: float64>");
     }
 }

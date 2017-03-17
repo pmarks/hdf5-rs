@@ -18,7 +18,6 @@ use handle::Handle;
 use plist::PropertyList;
 use util::to_cstring;
 
-use std::fmt;
 use std::path::Path;
 use std::process::Command;
 
@@ -39,6 +38,15 @@ impl ObjectType for FileID {
 
     fn type_name() -> &'static str {
         "file"
+    }
+
+    fn describe(obj: &File) -> String {
+        let basename = match Path::new(&obj.filename()).file_name() {
+            Some(s) => s.to_string_lossy().into_owned(),
+            None    => "".to_owned(),
+        };
+        let mode = if obj.is_read_only() { "read-only" } else { "read/write" };
+        format!("\"{}\" ({})", basename, mode)
     }
 }
 
@@ -153,26 +161,6 @@ impl File {
             }
             self.decref();
         })
-    }
-}
-
-impl fmt::Debug for File {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for File {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_valid() {
-            return "<HDF5 file: invalid id>".fmt(f);
-        }
-        let basename = match Path::new(&self.filename()).file_name() {
-            Some(s) => s.to_string_lossy().into_owned(),
-            None    => "".to_owned(),
-        };
-        let mode = if self.is_read_only() { "read-only" } else { "read/write" };
-        format!("<HDF5 file: \"{}\" ({})>", basename, mode).fmt(f)
     }
 }
 
@@ -522,18 +510,15 @@ pub mod tests {
     }
 
     #[test]
-    pub fn test_debug_display() {
+    pub fn test_debug() {
         with_tmp_dir(|dir| {
             let path = dir.join("qwe.h5");
             let file = File::open(&path, "w").unwrap();
-            assert_eq!(format!("{}", file), "<HDF5 file: \"qwe.h5\" (read/write)>");
             assert_eq!(format!("{:?}", file), "<HDF5 file: \"qwe.h5\" (read/write)>");
             file.close();
-            assert_eq!(format!("{}", file), "<HDF5 file: invalid id>");
             assert_eq!(format!("{:?}", file), "<HDF5 file: invalid id>");
             drop(file);
             let file = File::open(&path, "r").unwrap();
-            assert_eq!(format!("{}", file), "<HDF5 file: \"qwe.h5\" (read-only)>");
             assert_eq!(format!("{:?}", file), "<HDF5 file: \"qwe.h5\" (read-only)>");
         })
     }

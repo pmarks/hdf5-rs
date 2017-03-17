@@ -6,7 +6,8 @@ use ffi::h5s::{H5S_UNLIMITED, H5Sget_simple_extent_dims, H5Sget_simple_extent_nd
 use error::Result;
 use object::{Object, ObjectType, AllowTypes, ObjectID};
 
-use std::{fmt, ptr, slice};
+use std::ptr;
+use std::slice;
 use libc::c_int;
 
 /// A scalar integer type used by `Dimension` trait for indexing.
@@ -86,6 +87,20 @@ impl ObjectType for DataspaceID {
     fn type_name() -> &'static str {
         "dataspace"
     }
+
+    fn describe(obj: &Dataspace) -> String {
+        let mut dims = String::new();
+        for (i, dim) in obj.dims().iter().enumerate() {
+            if i > 0 {
+                dims.push_str(", ");
+            }
+            dims.push_str(&format!("{}", dim));
+        }
+        if obj.ndim() == 1 {
+            dims.push_str(",");
+        }
+        format!("({})", dims)
+    }
 }
 
 /// Represents the HDF5 dataspace object.
@@ -151,31 +166,6 @@ impl Dataspace {
     }
 }
 
-impl fmt::Debug for Dataspace {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for Dataspace {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_valid() {
-            return "<HDF5 dataspace: invalid id>".fmt(f);
-        }
-        let mut dims = String::new();
-        for (i, dim) in self.dims().iter().enumerate() {
-            if i > 0 {
-                dims.push_str(", ");
-            }
-            dims.push_str(&format!("{}", dim));
-        }
-        if self.ndim() == 1 {
-            dims.push_str(",");
-        }
-        format!("<HDF5 dataspace: ({})>", dims).fmt(f)
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::{Dimension, Ix, Dataspace};
@@ -201,17 +191,11 @@ pub mod tests {
     }
 
     #[test]
-    pub fn test_debug_display() {
-        assert_eq!(format!("{}", Dataspace::new((), true).unwrap()),
-            "<HDF5 dataspace: ()>");
+    pub fn test_debug() {
         assert_eq!(format!("{:?}", Dataspace::new((), true).unwrap()),
             "<HDF5 dataspace: ()>");
-        assert_eq!(format!("{}", Dataspace::new(3, true).unwrap()),
-            "<HDF5 dataspace: (3,)>");
         assert_eq!(format!("{:?}", Dataspace::new(3, true).unwrap()),
             "<HDF5 dataspace: (3,)>");
-        assert_eq!(format!("{}", Dataspace::new((1, 2), true).unwrap()),
-            "<HDF5 dataspace: (1, 2)>");
         assert_eq!(format!("{:?}", Dataspace::new((1, 2), true).unwrap()),
             "<HDF5 dataspace: (1, 2)>");
     }
