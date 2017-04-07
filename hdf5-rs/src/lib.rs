@@ -85,7 +85,7 @@ pub mod prelude {
 
 mod internal_prelude {
     pub use container::Container;
-    pub use dataset::{Dataset, DatasetBuilder};
+    pub use dataset::{Dataset, DatasetBuilder, MaybeType, Type};
     pub use datatype::Datatype;
     pub use error::{Error, Result, silence_errors};
     pub use file::{File, FileBuilder};

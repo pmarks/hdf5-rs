@@ -3,15 +3,17 @@ use internal_prelude::*;
 use ffi::h5::HADDR_UNDEF;
 use ffi::h5d::{
     H5Dcreate2, H5Dcreate_anon, H5D_FILL_TIME_ALLOC, H5Dget_create_plist, H5D_layout_t,
-    H5Dget_space, H5Dget_storage_size, H5Dget_offset, H5Dget_type, H5D_fill_value_t
+    H5Dget_space, H5Dget_storage_size, H5Dget_offset, H5Dget_type
 };
 use ffi::h5p::{
     H5Pcreate, H5Pset_create_intermediate_group, H5Pset_obj_track_times,
     H5Pset_fill_time, H5Pset_chunk, H5Pget_layout, H5Pget_chunk, H5Pset_fill_value,
     H5Pget_obj_track_times, H5Pget_fill_value, H5Pfill_value_defined
 };
+use ffi::h5t::{H5Tequal, H5Tcompiler_conv};
 use globals::H5P_LINK_CREATE;
 
+use std::marker::PhantomData;
 use std::mem;
 
 use num::integer::div_floor;
@@ -24,33 +26,64 @@ pub enum Chunk {
     Manual(Vec<Ix>)
 }
 
+pub trait MaybeType : 'static {
+    #[doc(hidden)]
+    fn check_type(id: hid_t) -> Result<()>;
+}
+
+impl MaybeType for () {
+    fn check_type(_: hid_t) -> Result<()> {
+        Ok(())
+    }
+}
+
+pub struct Type<T>(PhantomData<T>);
+
+impl<T: H5Type> MaybeType for Type<T> {
+    fn check_type(id: hid_t) -> Result<()> {
+        h5lock!({
+            Ok(ensure!(
+                Datatype::from_type::<T>()
+                    .and_then(|t| {
+                        let conv_to = H5Tcompiler_conv(id, t.id()) >= 0;
+                        let conv_from = H5Tcompiler_conv(t.id(), id) >= 0;
+                        Ok(conv_to && conv_from)
+                    })?,
+                "No type conversion paths found"))
+        })
+    }
+}
+
 /// Represents the HDF5 dataset object.
-pub struct Dataset {
+pub struct Dataset<T: MaybeType> {
     handle: Handle,
     dcpl: PropertyList,
     filters: Filters,
+    marker: PhantomData<T>,
 }
 
 #[doc(hidden)]
-impl ID for Dataset {
+impl<T: MaybeType> ID for Dataset<T> {
     fn id(&self) -> hid_t {
         self.handle.id()
     }
 }
 
 #[doc(hidden)]
-impl FromID for Dataset {
-    fn from_id(id: hid_t) -> Result<Dataset> {
+impl<T: MaybeType> FromID for Dataset<T> {
+    fn from_id(id: hid_t) -> Result<Dataset<T>> {
         h5lock!({
             match get_id_type(id) {
                 H5I_DATASET => {
                     let handle = Handle::new(id)?;
+                    T::check_type(h5try!(H5Dget_type(id)))?;
                     let dcpl = PropertyList::from_id(h5try!(H5Dget_create_plist(id)))?;
                     let filters = Filters::from_dcpl(&dcpl)?;
                     Ok(Dataset {
                         handle: handle,
                         dcpl: dcpl,
                         filters: filters,
+                        marker: PhantomData,
                     })
                 },
                 _ => Err(From::from(format!("Invalid property list id: {}", id))),
@@ -59,11 +92,48 @@ impl FromID for Dataset {
     }
 }
 
-impl Object for Dataset {}
+impl<T: MaybeType> Object for Dataset<T> {}
 
-impl Location for Dataset {}
+impl<T: MaybeType> Location for Dataset<T> {}
 
-impl Dataset {
+impl Dataset<()> {
+    pub fn cast_to<T: H5Type>(self) -> Result<Dataset<Type<T>>> {
+        let datatype = self.datatype()?;
+        Type::<T>::check_type(datatype.id())?;
+        Ok(unsafe { mem::transmute(self) })
+    }
+
+    pub fn of_type<T: H5Type>(self) -> Result<Dataset<Type<T>>> {
+        let ftype = self.datatype()?;
+        let mtype = Datatype::from_type::<T>()?;
+        ensure!(h5try!(H5Tequal(ftype.id(), mtype.id())) != 0,
+                "Datatypes do not match exactly");
+        Ok(unsafe { mem::transmute(self) })
+    }
+}
+
+impl<T: H5Type> Dataset<Type<T>> {
+    pub fn fill_value(&self) -> Result<Option<T>> {
+        use ffi::h5d::H5D_fill_value_t::*;
+        h5lock!({
+            let defined: *mut _ = &mut H5D_FILL_VALUE_UNDEFINED;
+            h5try!(H5Pfill_value_defined(self.dcpl.id(), defined));
+            match *defined {
+                H5D_FILL_VALUE_ERROR => fail!("Invalid fill value"),
+                H5D_FILL_VALUE_UNDEFINED => Ok(None),
+                _ => {
+                    let datatype = self.datatype()?;
+                    let mut value: T = mem::uninitialized();
+                    h5try!(H5Pget_fill_value(self.dcpl.id(), datatype.id(),
+                                             &mut value as *mut _ as *mut _));
+                    Ok(Some(value))
+                }
+            }
+        })
+    }
+}
+
+impl<T: MaybeType> Dataset<T> {
     /// Returns the shape of the dataset.
     pub fn shape(&self) -> Vec<Ix> {
         if let Ok(s) = self.dataspace() { s.dims() } else { vec![] }
@@ -92,11 +162,6 @@ impl Dataset {
     /// Returns whether this dataset has a chunked layout.
     pub fn is_chunked(&self) -> bool {
         h5lock!(H5Pget_layout(self.dcpl.id()) == H5D_layout_t::H5D_CHUNKED)
-    }
-
-    /// Returns whether this dataset's type is equivalent to the given type.
-    pub fn is_type<T: H5Type>(&self) -> bool {
-        Datatype::from_type::<T>().and_then(|a| self.datatype().map(|b| a == b)).unwrap_or(false)
     }
 
     /// Returns the chunk shape if the dataset is chunked.
@@ -143,27 +208,6 @@ impl Dataset {
         if offset == HADDR_UNDEF { None } else { Some(offset as _) }
     }
 
-    /// Returns default fill value for the dataset if such value is set. Note that conversion
-    /// to the requested type is done by HDF5 which may result in loss of precision for
-    /// floating-point values if the datatype differs from the datatype of of the dataset.
-    pub fn fill_value<T: H5Type>(&self) -> Result<Option<T>> {
-        h5lock!({
-            let defined: *mut H5D_fill_value_t = &mut H5D_fill_value_t::H5D_FILL_VALUE_UNDEFINED;
-            h5try!(H5Pfill_value_defined(self.dcpl.id(), defined));
-            match *defined {
-                H5D_fill_value_t::H5D_FILL_VALUE_ERROR => fail!("Invalid fill value"),
-                H5D_fill_value_t::H5D_FILL_VALUE_UNDEFINED => Ok(None),
-                _ => {
-                    let datatype = Datatype::from_type::<T>()?;
-                    let mut value: T = mem::uninitialized();
-                    h5try!(H5Pget_fill_value(self.dcpl.id(), datatype.id(),
-                                             &mut value as *mut _ as *mut _));
-                    Ok(Some(value))
-                }
-            }
-        })
-    }
-
     fn dataspace(&self) -> Result<Dataspace> {
         Dataspace::from_id(h5try!(H5Dget_space(self.id())))
     }
@@ -173,6 +217,8 @@ impl Dataset {
         Datatype::from_id(h5try!(H5Dget_type(self.id())))
     }
 }
+
+
 
 #[derive(Clone)]
 pub struct DatasetBuilder<T> {
@@ -329,7 +375,7 @@ impl<T: H5Type> DatasetBuilder<T> {
         })
     }
 
-    fn finalize<D: Dimension>(&self, name: Option<&str>, shape: D) -> Result<Dataset> {
+    fn finalize<D: Dimension>(&self, name: Option<&str>, shape: D) -> Result<Dataset<Type<T>>> {
         h5lock!({
             let datatype = Datatype::from_type::<T>()?;
             let parent = try_ref_clone!(self.parent);
@@ -357,12 +403,12 @@ impl<T: H5Type> DatasetBuilder<T> {
     }
 
     /// Create the dataset and link it into the file structure.
-    pub fn create<D: Dimension>(&self, name: &str, shape: D) -> Result<Dataset> {
+    pub fn create<D: Dimension>(&self, name: &str, shape: D) -> Result<Dataset<Type<T>>> {
         self.finalize(Some(name), shape)
     }
 
     /// Create an anonymous dataset without linking it.
-    pub fn create_anon<D: Dimension>(&self, shape: D) -> Result<Dataset> {
+    pub fn create_anon<D: Dimension>(&self, shape: D) -> Result<Dataset<Type<T>>> {
         self.finalize(None, shape)
     }
 }
@@ -620,7 +666,7 @@ pub mod tests {
             assert!(ds.is_valid());
             assert_eq!(ds.shape(), vec![1, 2]);
             assert_eq!(ds.name(), "/foo/bar");
-            assert_eq!(file.group("foo").unwrap().dataset("bar").unwrap().shape(), vec![1, 2]);
+            assert_eq!(file.group("foo").unwrap().dataset::<()>("bar").unwrap().shape(), vec![1, 2]);
 
             let ds = file.new_dataset::<u32>().create_anon((2, 3)).unwrap();
             assert!(ds.is_valid());
@@ -629,60 +675,60 @@ pub mod tests {
         })
     }
 
-    #[test]
-    pub fn test_fill_value() {
-        with_tmp_file(|file| {
-            macro_rules! check_fill_value {
-                ($ds:expr, $tp:ty, $v:expr) => (
-                    assert_eq!(($ds).fill_value::<$tp>().unwrap(), Some(($v) as $tp));
-                );
-            }
+    // #[test]
+    // pub fn test_fill_value() {
+    //     with_tmp_file(|file| {
+    //         macro_rules! check_fill_value {
+    //             ($ds:expr, $tp:ty, $v:expr) => (
+    //                 assert_eq!(($ds).fill_value::<$tp>().unwrap(), Some(($v) as $tp));
+    //             );
+    //         }
 
-            macro_rules! check_fill_value_approx {
-                ($ds:expr, $tp:ty, $v:expr) => ({
-                    let fill_value = ($ds).fill_value::<$tp>().unwrap().unwrap();
-                    // FIXME: should inexact float->float casts be prohibited?
-                    assert!((fill_value - (($v) as $tp)).abs() < (1.0e-6 as $tp));
-                });
-            }
+    //         macro_rules! check_fill_value_approx {
+    //             ($ds:expr, $tp:ty, $v:expr) => ({
+    //                 let fill_value = ($ds).fill_value::<$tp>().unwrap().unwrap();
+    //                 // FIXME: should inexact float->float casts be prohibited?
+    //                 assert!((fill_value - (($v) as $tp)).abs() < (1.0e-6 as $tp));
+    //             });
+    //         }
 
-            macro_rules! check_all_fill_values {
-                ($ds:expr, $v:expr) => (
-                    check_fill_value!($ds, u8, $v);
-                    check_fill_value!($ds, u16, $v);
-                    check_fill_value!($ds, u32, $v);
-                    check_fill_value!($ds, u64, $v);
-                    check_fill_value!($ds, i8, $v);
-                    check_fill_value!($ds, i16, $v);
-                    check_fill_value!($ds, i32, $v);
-                    check_fill_value!($ds, i64, $v);
-                    check_fill_value!($ds, usize, $v);
-                    check_fill_value!($ds, isize, $v);
-                    check_fill_value_approx!($ds, f32, $v);
-                    check_fill_value_approx!($ds, f64, $v);
-                )
-            }
+    //         macro_rules! check_all_fill_values {
+    //             ($ds:expr, $v:expr) => (
+    //                 check_fill_value!($ds, u8, $v);
+    //                 check_fill_value!($ds, u16, $v);
+    //                 check_fill_value!($ds, u32, $v);
+    //                 check_fill_value!($ds, u64, $v);
+    //                 check_fill_value!($ds, i8, $v);
+    //                 check_fill_value!($ds, i16, $v);
+    //                 check_fill_value!($ds, i32, $v);
+    //                 check_fill_value!($ds, i64, $v);
+    //                 check_fill_value!($ds, usize, $v);
+    //                 check_fill_value!($ds, isize, $v);
+    //                 check_fill_value_approx!($ds, f32, $v);
+    //                 check_fill_value_approx!($ds, f64, $v);
+    //             )
+    //         }
 
-            let ds = file.new_dataset::<u16>().create_anon(100).unwrap();
-            check_all_fill_values!(ds, 0);
+    //         let ds = file.new_dataset::<u16>().create_anon(100).unwrap();
+    //         check_all_fill_values!(ds, 0);
 
-            let ds = file.new_dataset::<u16>().fill_value(42).create_anon(100).unwrap();
-            check_all_fill_values!(ds, 42);
+    //         let ds = file.new_dataset::<u16>().fill_value(42).create_anon(100).unwrap();
+    //         check_all_fill_values!(ds, 42);
 
-            let ds = file.new_dataset::<f32>().fill_value(1.234).create_anon(100).unwrap();
-            check_all_fill_values!(ds, 1.234);
-        })
-    }
+    //         let ds = file.new_dataset::<f32>().fill_value(1.234).create_anon(100).unwrap();
+    //         check_all_fill_values!(ds, 1.234);
+    //     })
+    // }
 
-    #[test]
-    pub fn test_is_type() {
-        with_tmp_file(|file| {
-            let ds = file.new_dataset::<u16>().create_anon(100).unwrap();
-            assert_eq!(ds.is_type::<u16>(), true);
+    // #[test]
+    // pub fn test_is_type() {
+    //     with_tmp_file(|file| {
+    //         let ds = file.new_dataset::<u16>().create_anon(100).unwrap();
+    //         assert_eq!(ds.is_type::<u16>(), true);
 
-            assert_eq!(ds.is_type::<i16>(), false);
-            assert_eq!(ds.is_type::<u8>(), false);
-            assert_eq!(ds.is_type::<f32>(), false);
-        })
-    }
+    //         assert_eq!(ds.is_type::<i16>(), false);
+    //         assert_eq!(ds.is_type::<u8>(), false);
+    //         assert_eq!(ds.is_type::<f32>(), false);
+    //     })
+    // }
 }

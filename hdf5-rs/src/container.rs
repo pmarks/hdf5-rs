@@ -94,7 +94,7 @@ pub trait Container: Location {
     }
 
     /// Opens an existing dataset in the file or group.
-    fn dataset(&self, name: &str) -> Result<Dataset> {
+    fn dataset<T: MaybeType>(&self, name: &str) -> Result<Dataset<T>> {
         let name = to_cstring(name)?;
         Dataset::from_id(h5try!(H5Dopen2(
             self.id(), name.as_ptr(), H5P_DEFAULT)))
