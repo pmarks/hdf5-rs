@@ -16,6 +16,20 @@ pub struct Reader<'a> {
     conv: Conversion,
 }
 
+#[derive(Debug)]
+pub struct SlicedReader<'a, S, D>
+where D: ndarray::Dimension, S: AsRef<[SliceOrIndex]> {
+    obj: &'a Reader<'a>,
+    slice: &'a SliceInfo<S,D>
+}
+
+impl<'a, S, D> SlicedReader<'a, S, D>
+where D: ndarray::Dimension, S: AsRef<[SliceOrIndex]> {
+    pub fn read<T: H5Type>(&self) -> Result<Array<T, D>> {
+        self.obj.read_slice(self.slice)
+    }
+}
+
 impl<'a> Reader<'a> {
     /// Creates a reader for a dataset/attribute.
     ///
@@ -53,6 +67,17 @@ impl<'a> Reader<'a> {
             h5try!(H5Dread(obj_id, tp_id, mspace_id, fspace_id, H5P_DEFAULT, buf as *mut _));
         }
         Ok(())
+    }
+
+    pub fn slice<'b, S, D>(&'b self, slice: &'b SliceInfo<S, D>) -> SlicedReader<'b, S, D>
+    where
+        S: AsRef<[SliceOrIndex]>,
+        D: ndarray::Dimension,
+    {
+        SlicedReader {
+            obj: self,
+            slice,
+        }
     }
 
     /// Reads a slice of an n-dimensional array.
@@ -207,6 +232,23 @@ pub struct Writer<'a> {
     conv: Conversion,
 }
 
+#[derive(Debug)]
+pub struct SlicedWriter<'a, S, D>
+where D: ndarray::Dimension, S: AsRef<[SliceOrIndex]> {
+    obj: &'a Writer<'a>,
+    slice: &'a SliceInfo<S,D>
+}
+
+impl<'a, S, D> SlicedWriter<'a, S, D>
+where D: ndarray::Dimension, S: AsRef<[SliceOrIndex]> {
+    pub fn write<'b, T: H5Type, A>(&self, arr: A) -> Result<()>
+    where
+        A: Into<ArrayView<'b, T, D>>,
+        T: H5Type {
+        self.obj.write_slice(arr, self.slice)
+    }
+}
+
 impl<'a> Writer<'a> {
     /// Creates a writer for a dataset/attribute.
     ///
@@ -245,6 +287,23 @@ impl<'a> Writer<'a> {
         }
         Ok(())
     }
+
+    /// Writes all data from the array `arr` into the given `slice` of the target dataset.
+    /// The shape of `arr` must match the shape the set of elements included in the slice.
+    /// If the array has a fixed number of dimensions, it must match the dimensionality of
+    /// dataset. Use the multi-dimensional slice macro `s![]` from `ndarray` to conveniently create
+    /// a multidimensional slice.
+    pub fn slice<'b, S, D>(&'b self, slice: &'b SliceInfo<S, D>) -> SlicedWriter<'b, S, D>
+    where
+        S: AsRef<[SliceOrIndex]>,
+        D: ndarray::Dimension,
+    {
+        SlicedWriter {
+            obj: self,
+            slice
+        }
+    }
+
 
     /// Writes all data from the array `arr` into the given `slice` of the target dataset.
     /// The shape of `arr` must match the shape the set of elements included in the slice.
