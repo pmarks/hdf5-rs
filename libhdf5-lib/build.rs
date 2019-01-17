@@ -132,9 +132,9 @@ mod conda {
     pub const LIB_PATH: &'static str = "lib";
 
     pub const DLS: &[(&'static str, &'static str, &'static str)] = &[
-        ("hdf5-1.10.4-hb1b8bf9_0.tar.bz2", 
-         "https://repo.continuum.io/pkgs/main/linux-64/hdf5-1.10.4-hb1b8bf9_0.tar.bz2",
-         "e25e1d2af9836593f3678198b14816eb"),
+        ("hdf5-1.8.18-h6792536_1.tar.bz2",
+         "https://repo.anaconda.com/pkgs/main/linux-64/hdf5-1.8.18-h6792536_1.tar.bz2",
+         "e1777f7e576b39d342061a1c8d712832"),
         ("zlib-1.2.11-hfbfcf68_1.tar.bz2", 
          "https://repo.continuum.io/pkgs/main/linux-64/zlib-1.2.11-hfbfcf68_1.tar.bz2",
          "cb3dfd6392fcc03474b8d71cf8f0b264")
