@@ -1,0 +1,3 @@
+[submodule "ext/c-blosc"]
+	path = ext/c-blosc
+	url = https://github.com/Blosc/c-blosc.git

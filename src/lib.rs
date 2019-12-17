@@ -22,11 +22,16 @@ mod export {
         dim::{Dimension, Ix},
         error::{silence_errors, Error, Result},
         filters::Filters,
+        hl::extents::{Extent, Extents, SimpleExtents},
+        hl::selection::{Hyperslab, Selection, SliceOrIndex},
         hl::{
             Container, Conversion, Dataset, DatasetBuilder, Dataspace, Datatype, File, FileBuilder,
             Group, Location, Object, PropertyList, Reader, Writer,
         },
     };
+
+    #[doc(hidden)]
+    pub use crate::error::h5check;
 
     pub use hdf5_derive::H5Type;
     pub use hdf5_types::H5Type;
@@ -38,6 +43,7 @@ mod export {
     pub mod dataset {
         pub use crate::hl::dataset::{Chunk, Dataset, DatasetBuilder};
         pub use crate::hl::plist::dataset_access::*;
+        pub use crate::hl::plist::dataset_create::*;
     }
 
     pub mod file {
@@ -47,19 +53,27 @@ mod export {
     }
 
     pub mod plist {
-        pub use crate::hl::plist::dataset_access::DatasetAccess;
-        pub use crate::hl::plist::file_access::FileAccess;
-        pub use crate::hl::plist::file_create::FileCreate;
+        pub use crate::hl::plist::dataset_access::{DatasetAccess, DatasetAccessBuilder};
+        pub use crate::hl::plist::dataset_create::{DatasetCreate, DatasetCreateBuilder};
+        pub use crate::hl::plist::file_access::{FileAccess, FileAccessBuilder};
+        pub use crate::hl::plist::file_create::{FileCreate, FileCreateBuilder};
+        pub use crate::hl::plist::link_create::{LinkCreate, LinkCreateBuilder};
         pub use crate::hl::plist::{PropertyList, PropertyListClass};
 
         pub mod dataset_access {
             pub use crate::hl::plist::dataset_access::*;
+        }
+        pub mod dataset_create {
+            pub use crate::hl::plist::dataset_create::*;
         }
         pub mod file_access {
             pub use crate::hl::plist::file_access::*;
         }
         pub mod file_create {
             pub use crate::hl::plist::file_create::*;
+        }
+        pub mod link_create {
+            pub use crate::hl::plist::link_create::*;
         }
     }
 }
@@ -76,7 +90,8 @@ mod error;
 mod filters;
 mod globals;
 mod handle;
-mod sync;
+#[doc(hidden)]
+pub mod sync;
 mod util;
 
 mod hl;
@@ -100,9 +115,10 @@ mod internal_prelude {
         export::*,
         handle::{get_id_type, is_valid_user_id, Handle},
         hl::plist::PropertyListClass,
+        sync::sync,
         util::{
-            get_h5_str, string_from_cstr, string_from_fixed_bytes, string_to_fixed_bytes,
-            to_cstring,
+            get_h5_str, h5_free_memory, string_from_cstr, string_from_fixed_bytes,
+            string_to_fixed_bytes, to_cstring,
         },
     };
 

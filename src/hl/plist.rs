@@ -10,8 +10,10 @@ use hdf5_sys::h5p::{
 use crate::internal_prelude::*;
 
 pub mod dataset_access;
+pub mod dataset_create;
 pub mod file_access;
 pub mod file_create;
+pub mod link_create;
 
 /// Represents the HDF5 property list.
 #[repr(transparent)]
@@ -198,7 +200,7 @@ impl PropertyList {
                 return Err(Error::query().unwrap_or_else(|| "invalid property class".into()));
             }
             let name = string_from_cstr(buf);
-            libc::free(buf as _);
+            h5_free_memory(buf as _);
             PropertyListClass::from_str(&name)
         })
     }
