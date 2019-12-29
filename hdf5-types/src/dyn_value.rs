@@ -534,7 +534,7 @@ unsafe impl DynClone for DynVarLenString<'_> {
                 let dst = libc::malloc(raw_len + 1) as *mut _;
                 ptr::copy_nonoverlapping(self.get_ptr(), dst, raw_len);
                 *dst.add(raw_len) = 0;
-                *(out.as_mut_ptr() as *mut (*const u8)) = dst as _;
+                *(out.as_mut_ptr() as *mut *const u8) = dst as _;
             }
         }
     }
