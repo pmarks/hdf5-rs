@@ -3,7 +3,7 @@ use std::ops::Deref;
 
 use hdf5_sys::{
     h5::{hsize_t, H5_index_t, H5_iter_order_t},
-    h5a::{H5A_info_t, H5A_operator2_t, H5Acreate2, H5Aiterate2},
+    h5a::{H5A_info_t, H5A_operator2_t, H5Acreate2, H5Aiterate2, H5Aget_type},
 };
 
 use crate::internal_prelude::*;
@@ -43,6 +43,12 @@ impl Deref for Attribute {
 }
 
 impl Attribute {
+
+    pub fn datatype(&self) -> Result<Datatype> {
+        let tid = h5lock!(H5Aget_type(self.id()));
+        Datatype::from_id(tid)
+    }
+
     /// Returns names of all the members in the group, non-recursively.
     pub fn attribute_names<T: ObjectClass>(obj: &T) -> Result<Vec<String>> {
         extern "C" fn attributes_callback(
