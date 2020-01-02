@@ -9,7 +9,7 @@ use hdf5_sys::{
     h5a::H5Aopen,
     h5d::{
         H5D_fill_value_t, H5D_layout_t, H5Dcreate2, H5Dcreate_anon, H5Dget_create_plist,
-        H5Dget_offset, H5Dset_extent, H5D_FILL_TIME_ALLOC,
+        H5Dget_offset, H5Dget_type, H5Dset_extent, H5D_FILL_TIME_ALLOC,
     },
     h5p::{
         H5Pcreate, H5Pfill_value_defined, H5Pget_chunk, H5Pget_fill_value, H5Pget_layout,
@@ -64,6 +64,12 @@ pub enum Chunk {
 }
 
 impl Dataset {
+    
+    pub fn datatype(&self) -> Result<Datatype> {
+        let tid = h5lock!(H5Dget_type(self.id()));
+        Datatype::from_id(tid)
+    }
+
     /// Returns whether this dataset is resizable along some axis.
     pub fn is_resizable(&self) -> bool {
         h5lock!(self.space().ok().map_or(false, |s| s.is_resizable()))
@@ -171,6 +177,10 @@ impl Dataset {
     pub fn attribute(&self, name: &str) -> Result<Attribute> {
         let name = to_cstring(name)?;
         Attribute::from_id(h5try!(H5Aopen(self.id(), name.as_ptr(), H5P_DEFAULT)))
+    }
+
+    pub fn attribute_names(&self) -> Result<Vec<String>> {
+        Attribute::attribute_names(self)
     }
 }
 
