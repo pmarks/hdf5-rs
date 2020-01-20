@@ -64,11 +64,6 @@ pub enum Chunk {
 }
 
 impl Dataset {
-    
-    pub fn datatype(&self) -> Result<Datatype> {
-        let tid = h5lock!(H5Dget_type(self.id()));
-        Datatype::from_id(tid)
-    }
 
     /// Returns whether this dataset is resizable along some axis.
     pub fn is_resizable(&self) -> bool {

@@ -44,11 +44,6 @@ impl Deref for Attribute {
 
 impl Attribute {
 
-    pub fn datatype(&self) -> Result<Datatype> {
-        let tid = h5lock!(H5Aget_type(self.id()));
-        Datatype::from_id(tid)
-    }
-
     /// Returns names of all the members in the group, non-recursively.
     pub fn attribute_names<T: ObjectClass>(obj: &T) -> Result<Vec<String>> {
         extern "C" fn attributes_callback(
