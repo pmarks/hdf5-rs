@@ -42,9 +42,15 @@ mod export {
     }
 
     pub mod dataset {
+        #[cfg(hdf5_1_10_5)]
+        pub use crate::hl::dataset::ChunkInfo;
         pub use crate::hl::dataset::{Chunk, Dataset, DatasetBuilder};
         pub use crate::hl::plist::dataset_access::*;
         pub use crate::hl::plist::dataset_create::*;
+    }
+
+    pub mod datatype {
+        pub use crate::hl::datatype::{ByteOrder, Conversion, Datatype};
     }
 
     pub mod file {

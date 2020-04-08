@@ -2,15 +2,15 @@ use std::env;
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::os::raw::{c_int, c_uint};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str;
+use std::time::Duration;
 
 use regex::Regex;
 
-use curl::easy::Easy;
 use bzip2::read::BzDecoder;
 use tar::Archive;
 use md5;
@@ -347,7 +347,7 @@ mod windows {
 
     use serde::de::Error;
     use serde::{Deserialize, Deserializer};
-    use serde_derive::Deserialize;
+    use serde_derive::Deserialize as DeriveDeserialize;
     use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
 
@@ -361,7 +361,7 @@ mod windows {
         }
     }
 
-    #[derive(Clone, Deserialize)]
+    #[derive(Clone, DeriveDeserialize)]
     struct App {
         #[serde(rename = "DisplayName")]
         name: String,
@@ -653,25 +653,24 @@ mod conda {
 
 
 
-fn download(uri: &str, filename: &str, out_dir: &Path) {
+fn download(uri: &str, filename: &str, out_dir: &Path)  {
 
     let out = PathBuf::from(out_dir.join(filename));
 
     // Download the tarball.
     let f = fs::File::create(&out).unwrap();
-    let mut writer = io::BufWriter::new(f);
-    let mut easy = Easy::new();
-    easy.follow_location(true).unwrap();
-    easy.url(&uri).unwrap();
-    easy.write_function(move |data| {
-        Ok(writer.write(data).unwrap())
-    }).unwrap();
-    easy.perform().unwrap();
+    let writer = io::BufWriter::new(f);
 
-    let response_code = easy.response_code().unwrap();
-    if response_code != 200 {
-        panic!("Unexpected response code {} for {}", response_code, uri);
+    let req = attohttpc::get(uri)
+    .read_timeout(Duration::new(90, 0));
+
+    let response = req.send().unwrap();
+
+    if !response.is_success() {
+        panic!("Unexpected response code {:?} for {}", response.status(), uri);
     }
+
+    response.write_to(writer).unwrap();
 }
 
 fn calc_md5(path: &Path) -> String {
