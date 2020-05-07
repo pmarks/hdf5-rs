@@ -728,7 +728,7 @@ fn conda_static() {
     #[cfg(target_os = "linux")]
     println!("cargo:rustc-link-lib=static=hdf5");
 
-    #[cfg(target_os = "mac")]
+    #[cfg(target_os = "macos")]
     println!("cargo:rustc-link-lib=static=hdf5");
 
     #[cfg(not(target_os = "windows"))]
