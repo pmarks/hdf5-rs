@@ -92,7 +92,6 @@ impl ChunkInfo {
 }
 
 impl Dataset {
-
     /// Returns whether this dataset is resizable along some axis.
     pub fn is_resizable(&self) -> bool {
         h5lock!(self.space().ok().map_or(false, |s| s.is_resizable()))
