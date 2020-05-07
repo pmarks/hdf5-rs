@@ -718,7 +718,17 @@ fn conda_static() {
     }
 
     println!("cargo:rustc-link-search={}", out_dir.join(conda::LIB_PATH).display());
+
+    #[cfg(target_os = "windows")]
+    println!("cargo:rustc-link-lib=static=libhdf5");
+
+    #[cfg(target_os = "linux")]
     println!("cargo:rustc-link-lib=static=hdf5");
+
+    #[cfg(target_os = "mac")]
+    println!("cargo:rustc-link-lib=static=hdf5");
+
+
     println!("cargo:rustc-link-lib=static=z");
 
     let inc_dir = out_dir.join(conda::INC_PATH);
