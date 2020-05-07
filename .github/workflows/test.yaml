@@ -1,0 +1,65 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - name: rust version
+        run: rustup default 1.43.0
+      - name: add rustfmt 
+        run: rustup component add rustfmt
+      - name: Checkout
+        uses: actions/checkout@master
+        with:
+          submodules: true
+      - name: Check Rust formatting
+        run: cargo fmt -- --check
+      - name: build
+        run: cargo build --features conda
+      - name: unit tests
+        run: cargo test --features conda -- --nocapture 
+
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: rust version
+        run: rustup default 1.43.0
+      - name: add rustfmt
+        run: rustup component add rustfmt
+      - name: Checkout
+        uses: actions/checkout@master
+        with:
+          submodules: true
+      - name: Check Rust formatting
+        run: cargo fmt -- --check
+      - name: build
+        run: cargo build --features conda
+      - name: unit tests
+        run: cargo test --features conda -- --nocapture
+
+  test-mac:
+    runs-on: macos-latest
+    steps:
+      - name: rust version
+        run: rustup default 1.43.0
+      - name: add rustfmt 
+        run: rustup component add rustfmt
+      - name: Checkout
+        uses: actions/checkout@master
+        with:
+          submodules: true
+      - name: Check Rust formatting
+        run: cargo fmt -- --check
+      - name: build
+        run: cargo build --features conda
+      - name: unit tests
+        run: cargo test --features conda -- --nocapture 

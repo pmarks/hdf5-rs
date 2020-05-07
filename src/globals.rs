@@ -21,6 +21,7 @@ macro_rules! link_hid {
         lazy_static! {
             pub static ref $rust_name: ::hdf5_sys::h5i::hid_t = {
                 h5lock!(::hdf5_sys::h5::H5open());
+                let _r = $crate::hl::filters::register_filters();
                 *::hdf5_sys::$mod_name::$c_name
             };
         }
@@ -34,6 +35,7 @@ macro_rules! link_hid {
         lazy_static! {
             pub static ref $rust_name: ::hdf5_sys::h5i::hid_t = {
                 h5lock!(::hdf5_sys::h5::H5open());
+                let _r = $crate::hl::filters::register_filters();
                 unsafe { *(*::hdf5_sys::$mod_name::$c_name as *const _) }
             };
         }
@@ -316,8 +318,8 @@ link_hid!(H5E_BADSIZE, h5e::H5E_BADSIZE);
 
 // H5R constants
 lazy_static! {
-    pub static ref H5R_OBJ_REF_BUF_SIZE: usize = { mem::size_of::<haddr_t>() };
-    pub static ref H5R_DSET_REG_REF_BUF_SIZE: usize = { mem::size_of::<haddr_t>() + 4 };
+    pub static ref H5R_OBJ_REF_BUF_SIZE: usize = mem::size_of::<haddr_t>();
+    pub static ref H5R_DSET_REG_REF_BUF_SIZE: usize = mem::size_of::<haddr_t>() + 4;
 }
 
 // File drivers

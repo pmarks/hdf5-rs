@@ -49,6 +49,8 @@ macro_rules! test_pl_common {
         assert_eq!(pl_default.class()?, $plc);
         assert_eq!(pl_default, pl_default);
 
+        assert!(format!("{:?}", pl_default).starts_with(&format!("{:?}", $plc)));
+
         let mut b = $cls::build();
         let pl = $func(&mut b)?;
         assert_eq!(pl.class()?, $plc);
@@ -575,5 +577,212 @@ fn test_dapl_set_virtual_view() -> hdf5::Result<()> {
 fn test_dapl_set_virtual_printf_gap() -> hdf5::Result<()> {
     test_pl!(DA, virtual_printf_gap: 0);
     test_pl!(DA, virtual_printf_gap: 123);
+    Ok(())
+}
+
+type DC = DatasetCreate;
+type DCB = DatasetCreateBuilder;
+
+#[test]
+fn test_dcpl_common() -> hdf5::Result<()> {
+    test_pl_common!(DC, PropertyListClass::DatasetCreate, |b: &mut DCB| b
+        .layout(Layout::Compact)
+        .finish());
+    Ok(())
+}
+
+#[test]
+fn test_dcpl_set_chunk() -> hdf5::Result<()> {
+    assert!(DC::try_new()?.get_chunk()?.is_none());
+    assert_eq!(DCB::new().chunk(&[3, 7]).finish()?.get_chunk()?, Some(vec![3, 7]));
+    assert_eq!(DCB::new().chunk(&[3, 7]).finish()?.chunk(), Some(vec![3, 7]));
+    assert!(DCB::new().layout(Layout::Contiguous).finish()?.get_chunk()?.is_none());
+    assert!(DCB::new().layout(Layout::Compact).finish()?.get_chunk()?.is_none());
+    #[cfg(hdf5_1_10_0)]
+    assert!(DCB::new().layout(Layout::Virtual).finish()?.get_chunk()?.is_none());
+    assert_eq!(DCB::new().layout(Layout::Chunked).finish()?.get_chunk()?, Some(vec![]));
+    Ok(())
+}
+
+#[test]
+fn test_dcpl_set_layout() -> hdf5::Result<()> {
+    check_matches!(DC::try_new()?.get_layout()?, (), Layout::Contiguous);
+    test_pl!(DC, layout: Layout::Contiguous);
+    test_pl!(DC, layout: Layout::Compact);
+    test_pl!(DC, layout: Layout::Chunked);
+    #[cfg(hdf5_1_10_0)]
+    test_pl!(DC, layout: Layout::Virtual);
+    Ok(())
+}
+
+#[cfg(hdf5_1_10_0)]
+#[test]
+fn test_dcpl_set_chunk_opts() -> hdf5::Result<()> {
+    assert!(DC::try_new()?.get_chunk_opts()?.is_none());
+    let mut b = DCB::new();
+    assert!(b.layout(Layout::Contiguous).finish()?.get_chunk_opts()?.is_none());
+    assert!(b.layout(Layout::Compact).finish()?.get_chunk_opts()?.is_none());
+    #[cfg(hdf5_1_10_0)]
+    assert!(b.layout(Layout::Virtual).finish()?.get_chunk_opts()?.is_none());
+    b.layout(Layout::Chunked);
+    assert_eq!(b.finish()?.get_chunk_opts()?, Some(ChunkOpts::empty()));
+    b.chunk_opts(ChunkOpts::empty());
+    assert_eq!(b.finish()?.get_chunk_opts()?, Some(ChunkOpts::empty()));
+    b.chunk_opts(ChunkOpts::DONT_FILTER_PARTIAL_CHUNKS);
+    assert_eq!(b.finish()?.get_chunk_opts()?, Some(ChunkOpts::DONT_FILTER_PARTIAL_CHUNKS));
+    Ok(())
+}
+
+#[test]
+fn test_dcpl_set_alloc_time() -> hdf5::Result<()> {
+    check_matches!(DC::try_new()?.get_alloc_time()?, (), AllocTime::Late);
+    let mut b = DCB::new();
+    b.alloc_time(None);
+    b.layout(Layout::Contiguous);
+    check_matches!(b.finish()?.get_alloc_time()?, (), AllocTime::Late);
+    b.layout(Layout::Compact);
+    check_matches!(b.finish()?.get_alloc_time()?, (), AllocTime::Early);
+    b.layout(Layout::Chunked);
+    check_matches!(b.finish()?.get_alloc_time()?, (), AllocTime::Incr);
+    #[cfg(hdf5_1_10_0)]
+    {
+        b.layout(Layout::Virtual);
+        check_matches!(b.finish()?.get_alloc_time()?, (), AllocTime::Incr);
+    }
+    b.layout(Layout::Contiguous);
+    b.alloc_time(Some(AllocTime::Late));
+    check_matches!(b.finish()?.get_alloc_time()?, (), AllocTime::Late);
+    b.alloc_time(Some(AllocTime::Incr));
+    check_matches!(b.finish()?.get_alloc_time()?, (), AllocTime::Incr);
+    b.alloc_time(Some(AllocTime::Early));
+    check_matches!(b.finish()?.get_alloc_time()?, (), AllocTime::Early);
+    Ok(())
+}
+
+#[test]
+fn test_dcpl_external() -> hdf5::Result<()> {
+    assert_eq!(DC::try_new()?.get_external()?, vec![]);
+    let pl = DCB::new()
+        .external("bar", 0, 1)
+        .external("baz", 34, 100)
+        .external("foo", 12, 0)
+        .finish()?;
+    let expected = vec![
+        ExternalFile { name: "bar".to_owned(), offset: 0, size: 1 },
+        ExternalFile { name: "baz".to_owned(), offset: 34, size: 100 },
+        ExternalFile { name: "foo".to_owned(), offset: 12, size: 0 },
+    ];
+    assert_eq!(pl.get_external()?, expected);
+    assert_eq!(pl.external(), expected);
+    assert_eq!(DCB::from_plist(&pl)?.finish()?.get_external()?, expected);
+    let _e = hdf5::silence_errors();
+    assert!(DCB::new().external("a", 1, 0).external("b", 1, 2).finish().is_err());
+    Ok(())
+}
+
+#[cfg(hdf5_1_10_0)]
+#[test]
+fn test_dcpl_virtual_map() -> hdf5::Result<()> {
+    use hdf5::Hyperslab;
+    use ndarray::s;
+
+    let _e = hdf5::silence_errors();
+
+    let pl = DC::try_new()?;
+    assert!(pl.get_virtual_map().is_err());
+    assert_eq!(pl.virtual_map(), vec![]);
+
+    let pl = DCB::new().layout(Layout::Virtual).finish()?;
+    assert_eq!(pl.get_virtual_map()?, vec![]);
+    assert_eq!(pl.virtual_map(), vec![]);
+
+    let pl = DCB::new()
+        .layout(Layout::Virtual)
+        .virtual_map("foo", "bar", (3, 4..), (.., 1..), (10..=20, 10), (..3, 7..))
+        .virtual_map("x", "y", 100, 91.., 12, Hyperslab::new(s![2..;3]).set_block(0)?)
+        .finish()?;
+    let expected = vec![
+        VirtualMapping {
+            src_filename: "foo".into(),
+            src_dataset: "bar".into(),
+            src_extents: (3, 4..).into(),
+            src_selection: (..3, 1..4).into(),
+            vds_extents: (10..=20, 10).into(),
+            vds_selection: (..3, 7..10).into(),
+        },
+        VirtualMapping {
+            src_filename: "x".into(),
+            src_dataset: "y".into(),
+            src_extents: 100.into(),
+            src_selection: (91..100).into(),
+            vds_extents: 12.into(),
+            vds_selection: Hyperslab::new(s![2..11;3]).set_block(0)?.into(),
+        },
+    ];
+    assert_eq!(pl.get_virtual_map()?, expected);
+    assert_eq!(pl.virtual_map(), expected);
+
+    assert_eq!(DCB::from_plist(&pl)?.finish()?.get_virtual_map()?, expected);
+
+    Ok(())
+}
+
+type LC = LinkCreate;
+type LCB = LinkCreateBuilder;
+
+#[test]
+fn test_lcpl_common() -> hdf5::Result<()> {
+    test_pl_common!(LC, PropertyListClass::LinkCreate, |b: &mut LCB| b
+        .create_intermediate_group(true)
+        .finish());
+    Ok(())
+}
+
+#[test]
+fn test_lcpl_create_intermediate_group() -> hdf5::Result<()> {
+    assert_eq!(LC::try_new()?.get_create_intermediate_group()?, false);
+    assert_eq!(
+        LCB::new().create_intermediate_group(false).finish()?.get_create_intermediate_group()?,
+        false
+    );
+    assert_eq!(
+        LCB::new().create_intermediate_group(false).finish()?.create_intermediate_group(),
+        false
+    );
+    assert_eq!(
+        LCB::new().create_intermediate_group(true).finish()?.get_create_intermediate_group()?,
+        true
+    );
+    assert_eq!(
+        LCB::new().create_intermediate_group(true).finish()?.create_intermediate_group(),
+        true
+    );
+    let pl = LCB::new().create_intermediate_group(true).finish()?;
+    assert_eq!(LCB::from_plist(&pl)?.finish()?.get_create_intermediate_group()?, true);
+    Ok(())
+}
+
+#[test]
+fn test_lcpl_char_encoding() -> hdf5::Result<()> {
+    use hdf5::plist::link_create::CharEncoding;
+    assert_eq!(LC::try_new()?.get_char_encoding()?, CharEncoding::Ascii);
+    assert_eq!(
+        LCB::new().char_encoding(CharEncoding::Ascii).finish()?.get_char_encoding()?,
+        CharEncoding::Ascii
+    );
+    assert_eq!(
+        LCB::new().char_encoding(CharEncoding::Ascii).finish()?.char_encoding(),
+        CharEncoding::Ascii
+    );
+    assert_eq!(
+        LCB::new().char_encoding(CharEncoding::Utf8).finish()?.get_char_encoding()?,
+        CharEncoding::Utf8
+    );
+    assert_eq!(
+        LCB::new().char_encoding(CharEncoding::Utf8).finish()?.char_encoding(),
+        CharEncoding::Utf8
+    );
+    let pl = LCB::new().char_encoding(CharEncoding::Utf8).finish()?;
+    assert_eq!(LCB::from_plist(&pl)?.finish()?.get_char_encoding()?, CharEncoding::Utf8);
     Ok(())
 }

@@ -2,13 +2,18 @@ use std::env;
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::os::raw::{c_int, c_uint};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str;
+use std::time::Duration;
 
 use regex::Regex;
+
+use bzip2::read::BzDecoder;
+use md5;
+use tar::Archive;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Version {
@@ -32,7 +37,7 @@ impl Version {
         })
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub fn is_valid(self) -> bool {
         self.major == 1 && ((self.minor == 8 && self.micro >= 4) || (self.minor == 10))
     }
 }
@@ -79,7 +84,7 @@ impl Display for RuntimeError {
 }
 
 #[allow(non_snake_case, non_camel_case_types)]
-fn get_runtime_version_single<P: AsRef<Path>>(path: P) -> io::Result<Version> {
+fn get_runtime_version_single<P: AsRef<Path>>(path: P) -> Result<Version, Box<dyn Error>> {
     let lib = libloading::Library::new(path.as_ref())?;
 
     type H5open_t = unsafe extern "C" fn() -> c_int;
@@ -91,12 +96,9 @@ fn get_runtime_version_single<P: AsRef<Path>>(path: P) -> io::Result<Version> {
     let mut v: (c_uint, c_uint, c_uint) = (0, 0, 0);
     unsafe {
         if H5open() != 0 {
-            Err(io::Error::new(io::ErrorKind::Other, Box::new(RuntimeError("H5open()".into()))))
+            Err("H5open()".into())
         } else if H5get_libversion(&mut v.0, &mut v.1, &mut v.2) != 0 {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                Box::new(RuntimeError("H5get_libversion()".into())),
-            ))
+            Err("H5get_libversion()".into())
         } else {
             Ok(Version::new(v.0 as _, v.1 as _, v.2 as _))
         }
@@ -202,7 +204,7 @@ impl Header {
         }
 
         if !hdr.version.is_valid() {
-            panic!("Invalid H5_VERSION in the header: {:?}");
+            panic!("Invalid H5_VERSION in the header: {:?}", hdr.version);
         }
         hdr
     }
@@ -342,7 +344,7 @@ mod windows {
 
     use serde::de::Error;
     use serde::{Deserialize, Deserializer};
-    use serde_derive::Deserialize;
+    use serde_derive::Deserialize as DeriveDeserialize;
     use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
 
@@ -356,7 +358,7 @@ mod windows {
         }
     }
 
-    #[derive(Clone, Deserialize)]
+    #[derive(Clone, DeriveDeserialize)]
     struct App {
         #[serde(rename = "DisplayName")]
         name: String,
@@ -600,7 +602,152 @@ impl Config {
     }
 }
 
+// Use `conda search --json --platform 'win-64' hdf5`
+// to query the metadata of conda package (includes MD5 sum).
+
+#[cfg(target_os = "linux")]
+mod conda {
+    pub const INC_PATH: &'static str = "include";
+    pub const LIB_PATH: &'static str = "lib";
+
+    pub const DLS: &[(&'static str, &'static str, &'static str)] = &[
+        (
+            "hdf5-1.8.18-h6792536_1.tar.bz2",
+            "https://repo.anaconda.com/pkgs/main/linux-64/hdf5-1.8.18-h6792536_1.tar.bz2",
+            "e1777f7e576b39d342061a1c8d712832",
+        ),
+        (
+            "zlib-1.2.11-hfbfcf68_1.tar.bz2",
+            "https://repo.continuum.io/pkgs/main/linux-64/zlib-1.2.11-hfbfcf68_1.tar.bz2",
+            "cb3dfd6392fcc03474b8d71cf8f0b264",
+        ),
+    ];
+}
+
+#[cfg(target_os = "macos")]
+mod conda {
+    pub const INC_PATH: &'static str = "include";
+    pub const LIB_PATH: &'static str = "lib";
+
+    pub const DLS: &[(&'static str, &'static str, &'static str)] = &[
+        (
+            "hdf5-1.8.20-hfa1e0ec_1.tar.bz2",
+            "https://repo.continuum.io/pkgs/main/osx-64/hdf5-1.8.20-hfa1e0ec_1.tar.bz2",
+            "6b7457d9be3293d8ba73c36a0915d5f6",
+        ),
+        (
+            "zlib-1.2.11-hf3cbc9b_2.tar.bz2",
+            "https://repo.continuum.io/pkgs/main/osx-64/zlib-1.2.11-hf3cbc9b_2.tar.bz2",
+            "f77c7d05dc47868e181135af65cb6e26",
+        ),
+    ];
+}
+
+#[cfg(target_os = "windows")]
+mod conda {
+    pub const INC_PATH: &'static str = "Library\\include";
+    pub const LIB_PATH: &'static str = "Library\\lib";
+
+    pub const DLS: &[(&'static str, &'static str, &'static str)] = &[
+        (
+            "hdf5-1.8.16-vc14_0.tar.bz2",
+            "https://repo.continuum.io/pkgs/free/win-64/hdf5-1.8.16-vc14_0.tar.bz2",
+            "c935a1d232cbe8fe09c1ffe0a64a322b",
+        ),
+        (
+            "zlib-1.2.11-vc14h1cdd9ab_1.tar.bz2",
+            "https://repo.continuum.io/pkgs/main/win-64/zlib-1.2.11-vc14h1cdd9ab_1.tar.bz2",
+            "4e2394286375c49f880e159a7efae05f",
+        ),
+    ];
+}
+
+fn download(uri: &str, filename: &str, out_dir: &Path) {
+    let out = PathBuf::from(out_dir.join(filename));
+
+    // Download the tarball.
+    let f = fs::File::create(&out).unwrap();
+    let writer = io::BufWriter::new(f);
+
+    let req = attohttpc::get(uri).read_timeout(Duration::new(90, 0));
+
+    let response = req.send().unwrap();
+
+    if !response.is_success() {
+        panic!("Unexpected response code {:?} for {}", response.status(), uri);
+    }
+
+    response.write_to(writer).unwrap();
+}
+
+fn calc_md5(path: &Path) -> String {
+    let mut f = io::BufReader::new(fs::File::open(path).unwrap());
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).unwrap();
+
+    let digest = md5::compute(&buf);
+    format!("{:x}", digest)
+}
+
+fn extract<P: AsRef<Path>, P2: AsRef<Path>>(archive_path: P, extract_to: P2) {
+    let file = fs::File::open(archive_path).unwrap();
+    let unzipped = BzDecoder::new(file);
+    let mut a = Archive::new(unzipped);
+    a.unpack(extract_to).unwrap();
+}
+
+/// Statically link to HDF5 binaries provided by conda
+/// TODO: detect what window runtime version is in use & select correct package?
+fn conda_static() {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    for (archive, uri, md5) in conda::DLS {
+        let archive_path = out_dir.join(archive);
+        if archive_path.exists() && calc_md5(&archive_path) == *md5 {
+            println!("Use existings archive");
+        } else {
+            println!("Download archive");
+            download(uri, archive, &out_dir);
+            extract(&archive_path, &out_dir);
+
+            let sum = calc_md5(&archive_path);
+            if sum != *md5 {
+                panic!("check sum of downloaded archive is incorrect: md5sum={}", sum);
+            }
+        }
+    }
+
+    println!("cargo:rustc-link-search={}", out_dir.join(conda::LIB_PATH).display());
+
+    #[cfg(target_os = "windows")]
+    {
+        println!("cargo:rustc-link-lib=static=zlibstatic");
+        println!("cargo:rustc-link-lib=static=libhdf5");
+    }
+
+    #[cfg(target_os = "linux")]
+    println!("cargo:rustc-link-lib=static=hdf5");
+
+    #[cfg(target_os = "macos")]
+    println!("cargo:rustc-link-lib=static=hdf5");
+
+    #[cfg(not(target_os = "windows"))]
+    println!("cargo:rustc-link-lib=static=z");
+
+    let inc_dir = out_dir.join(conda::INC_PATH);
+
+    let header = Header::parse(&inc_dir);
+    let cfg = Config { inc_dir, link_paths: Vec::new(), header };
+
+    cfg.emit_cfg_flags();
+}
+
 fn main() {
+    if env::var("CARGO_FEATURE_CONDA").is_ok() {
+        conda_static();
+        return;
+    }
+
     let mut searcher = LibrarySearcher::new_from_env();
     searcher.try_locate_hdf5_library();
     let config = searcher.finalize();

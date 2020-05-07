@@ -25,6 +25,12 @@ pub enum H5D_layout_t {
     H5D_NLAYOUTS = 3,
 }
 
+impl Default for H5D_layout_t {
+    fn default() -> Self {
+        H5D_layout_t::H5D_CONTIGUOUS
+    }
+}
+
 pub type H5D_chunk_index_t = c_uint;
 
 pub const H5D_CHUNK_BTREE: H5D_chunk_index_t = 0;
@@ -38,6 +44,12 @@ pub enum H5D_alloc_time_t {
     H5D_ALLOC_TIME_EARLY = 1,
     H5D_ALLOC_TIME_LATE = 2,
     H5D_ALLOC_TIME_INCR = 3,
+}
+
+impl Default for H5D_alloc_time_t {
+    fn default() -> Self {
+        H5D_alloc_time_t::H5D_ALLOC_TIME_DEFAULT
+    }
 }
 
 #[repr(C)]
@@ -58,6 +70,12 @@ pub enum H5D_fill_time_t {
     H5D_FILL_TIME_IFSET = 2,
 }
 
+impl Default for H5D_fill_time_t {
+    fn default() -> Self {
+        H5D_fill_time_t::H5D_FILL_TIME_IFSET
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum H5D_fill_value_t {
@@ -65,6 +83,12 @@ pub enum H5D_fill_value_t {
     H5D_FILL_VALUE_UNDEFINED = 0,
     H5D_FILL_VALUE_DEFAULT = 1,
     H5D_FILL_VALUE_USER_DEFINED = 2,
+}
+
+impl Default for H5D_fill_value_t {
+    fn default() -> Self {
+        H5D_fill_value_t::H5D_FILL_VALUE_DEFAULT
+    }
 }
 
 #[repr(C)]
@@ -208,7 +232,7 @@ mod hdf5_1_10_0 {
         }
     }
 
-    pub const H5D_CHUNK_DONT_FILTER_PARTIAL_CHUNKS: c_uint = 1;
+    pub const H5D_CHUNK_DONT_FILTER_PARTIAL_CHUNKS: c_uint = 0x0002;
 
     pub type H5D_append_cb_t = Option<
         unsafe extern "C" fn(
@@ -228,6 +252,17 @@ mod hdf5_1_10_0 {
 
 #[cfg(hdf5_1_10_0)]
 pub use self::hdf5_1_10_0::*;
+
+#[cfg(hdf5_1_10_3)]
+extern "C" {
+    pub fn H5Dread_chunk(
+        dset_id: hid_t, dxpl_id: hid_t, offset: *const hsize_t, filters: *mut u32, buf: *mut c_void,
+    ) -> herr_t;
+    pub fn H5Dwrite_chunk(
+        dset_id: hid_t, dxpl_id: hid_t, filters: u32, offset: *const hsize_t, data_size: size_t,
+        buf: *const c_void,
+    ) -> herr_t;
+}
 
 #[cfg(hdf5_1_10_5)]
 extern "C" {
