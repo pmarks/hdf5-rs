@@ -425,7 +425,7 @@ impl<T: H5Type> DatasetBuilder<T> {
         })
     }
 
-    fn make_lcpl(&self) -> Result<PropertyList> {
+    fn make_lcpl() -> Result<PropertyList> {
         h5lock!({
             let lcpl = PropertyList::from_id(h5try!(H5Pcreate(*H5P_LINK_CREATE)))?;
             h5call!(H5Pset_create_intermediate_group(lcpl.id(), 1)).and(Ok(lcpl))
@@ -451,7 +451,7 @@ impl<T: H5Type> DatasetBuilder<T> {
 
             match name {
                 Some(name) => {
-                    let lcpl = self.make_lcpl()?;
+                    let lcpl = Self::make_lcpl()?;
                     let name = to_cstring(name)?;
                     Dataset::from_id(h5try!(H5Dcreate2(
                         parent.id(),
@@ -501,9 +501,9 @@ fn infer_chunk_size(shape: &[Ix], typesize: usize) -> Vec<Ix> {
         return vec![1];
     }
 
-    let mut chunks = shape.to_vec();
-    let total = (typesize * size) as f64;
-    let mut target: f64 = CHUNK_BASE * 2.0_f64.powf((total / (1024.0 * 1024.0)).log10());
+    let mut chunks = shape.dims();
+    let total = (typesize * shape.size()) as f64;
+    let mut target: f64 = CHUNK_BASE * (total / (1024.0 * 1024.0)).log10().exp2();
 
     if target > CHUNK_MAX {
         target = CHUNK_MAX;

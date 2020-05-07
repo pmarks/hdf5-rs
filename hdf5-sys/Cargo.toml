@@ -1,6 +1,6 @@
 [package]
 name = "hdf5-sys"
-version = "0.6.0"  # !V
+version = "0.6.1"  # !V
 authors = ["Ivan Smirnov <i.s.smirnov@gmail.com>"]
 keywords = ["hdf5"]
 license = "MIT/Apache-2.0"
@@ -21,7 +21,7 @@ mpio = ["mpi-sys"]
 conda = []
 
 [build-dependencies]
-libloading = "0.5"
+libloading = "0.6"
 md5 = "0.6"
 attohttpc = { version = "0.12", default-features = false, features = ["compress", "tls-rustls"] }
 bzip2 = "0.3.3"
@@ -34,4 +34,4 @@ pkg-config = "0.3"
 [target.'cfg(windows)'.build-dependencies]
 serde = "1.0"
 serde_derive = "1.0"
-winreg = { version = "0.6", features = ["serialization-serde"]}
+winreg = { version = "0.7", features = ["serialization-serde"]}

@@ -37,7 +37,7 @@ impl Version {
         })
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub fn is_valid(self) -> bool {
         self.major == 1 && ((self.minor == 8 && self.micro >= 4) || (self.minor == 10))
     }
 }
@@ -84,7 +84,7 @@ impl Display for RuntimeError {
 }
 
 #[allow(non_snake_case, non_camel_case_types)]
-fn get_runtime_version_single<P: AsRef<Path>>(path: P) -> io::Result<Version> {
+fn get_runtime_version_single<P: AsRef<Path>>(path: P) -> Result<Version, Box<dyn Error>> {
     let lib = libloading::Library::new(path.as_ref())?;
 
     type H5open_t = unsafe extern "C" fn() -> c_int;
@@ -96,12 +96,9 @@ fn get_runtime_version_single<P: AsRef<Path>>(path: P) -> io::Result<Version> {
     let mut v: (c_uint, c_uint, c_uint) = (0, 0, 0);
     unsafe {
         if H5open() != 0 {
-            Err(io::Error::new(io::ErrorKind::Other, Box::new(RuntimeError("H5open()".into()))))
+            Err("H5open()".into())
         } else if H5get_libversion(&mut v.0, &mut v.1, &mut v.2) != 0 {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                Box::new(RuntimeError("H5get_libversion()".into())),
-            ))
+            Err("H5get_libversion()".into())
         } else {
             Ok(Version::new(v.0 as _, v.1 as _, v.2 as _))
         }
@@ -207,7 +204,7 @@ impl Header {
         }
 
         if !hdr.version.is_valid() {
-            panic!("Invalid H5_VERSION in the header: {:?}");
+            panic!("Invalid H5_VERSION in the header: {:?}", hdr.version);
         }
         hdr
     }
