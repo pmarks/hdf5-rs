@@ -728,7 +728,6 @@ fn conda_static() {
     #[cfg(target_os = "mac")]
     println!("cargo:rustc-link-lib=static=hdf5");
 
-
     println!("cargo:rustc-link-lib=static=z");
 
     let inc_dir = out_dir.join(conda::INC_PATH);
